@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "author": "Nhom 09 - He Thong Bao Khoi Canh Bao Som",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-gas-sensor",
+      "id": "mq2",
+      "top": -170,
+      "left": 150,
+      "attrs": { "ppm": "200" }
+    },
+    {
+      "type": "wokwi-dht22",
+      "id": "dht",
+      "top": -170,
+      "left": -180,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "bz1",
+      "top": 210,
+      "left": -180,
+      "attrs": { "volume": "0.1" }
+    },
+    {
+      "type": "wokwi-relay-module",
+      "id": "relay1",
+      "top": 200,
+      "left": 120,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led1",
+      "top": 200,
+      "left": 270,
+      "attrs": { "color": "blue", "label": "FAN" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn1",
+      "top": 40,
+      "left": 230,
+      "attrs": { "color": "green", "label": "Manual Fan" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "mq2:VCC", "esp:5V", "red", [] ],
+    [ "mq2:GND", "esp:GND.1", "black", [] ],
+    [ "mq2:AOUT", "esp:34", "gold", [] ],
+    [ "dht:VCC", "esp:3V3", "red", [] ],
+    [ "dht:GND", "esp:GND.1", "black", [] ],
+    [ "dht:SDA", "esp:4", "green", [] ],
+    [ "bz1:2", "esp:16", "orange", [] ],
+    [ "bz1:1", "esp:GND.1", "black", [] ],
+    [ "relay1:VCC", "esp:5V", "red", [] ],
+    [ "relay1:GND", "esp:GND.2", "black", [] ],
+    [ "relay1:IN", "esp:17", "purple", [] ],
+    [ "relay1:COM", "esp:5V", "red", [] ],
+    [ "relay1:NO", "led1:A", "blue", [] ],
+    [ "led1:C", "esp:GND.2", "black", [] ],
+    [ "btn1:1.l", "esp:18", "cyan", [] ],
+    [ "btn1:2.l", "esp:GND.1", "black", [] ]
+  ],
+  "dependencies": {}
+}

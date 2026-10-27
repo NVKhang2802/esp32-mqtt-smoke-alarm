@@ -1,0 +1,663 @@
+[
+  {
+    "id": "tab_middleware_smoke",
+    "type": "tab",
+    "label": "Tầng 3 - Middleware Automation Engine (Tuần 7: Business Rules & Abnormal)",
+    "disabled": false,
+    "info": "Middleware Engine xử lý dữ liệu cho Hệ thống báo khói cảnh báo sớm (Tuần 7: Business Rules & Abnormal Scenarios).\nBao gồm 5 Business Rules, 4 Kịch bản sự cố bất thường, Offline Buffer Replay, Watchdog 30s, Dynamic Day/Night Scheduler và Cross-Zone Emergency Automation."
+  },
+  {
+    "id": "broker_emqx_cloud",
+    "type": "mqtt-broker",
+    "name": "EMQX Public Broker",
+    "broker": "broker.emqx.io",
+    "port": "1883",
+    "clientid": "NodeRED_Smoke_Middleware_N04",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "autoUnsubscribe": true,
+    "birthTopic": "smoke/middleware/status",
+    "birthQos": "1",
+    "birthRetain": "true",
+    "birthPayload": "{\"middleware\": \"ONLINE\", \"version\": \"3.0.0\", \"milestone\": \"WEEK7_BUSINESS_RULES_ABNORMAL\"}",
+    "closeTopic": "smoke/middleware/status",
+    "closeQos": "1",
+    "closeRetain": "true",
+    "closePayload": "{\"middleware\": \"OFFLINE\"}",
+    "willTopic": "smoke/middleware/status",
+    "willQos": "1",
+    "willRetain": "true",
+    "willPayload": "{\"middleware\": \"CRASHED\"}"
+  },
+  {
+    "id": "mqtt_in_auth_req",
+    "type": "mqtt in",
+    "z": "tab_middleware_smoke",
+    "name": "Sub (1a): smoke/v2/auth/request",
+    "topic": "smoke/v2/auth/request",
+    "qos": "1",
+    "datatype": "auto-detect",
+    "broker": "broker_emqx_cloud",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 170,
+    "y": 80,
+    "wires": [
+      [
+        "fn_auth_service"
+      ]
+    ]
+  },
+  {
+    "id": "fn_auth_service",
+    "type": "function",
+    "z": "tab_middleware_smoke",
+    "name": "Dịch vụ 1: Auth & Whitelist (1b, 1c)",
+    "func": "// Cơ sở dữ liệu Whitelist thiết bị được phép vào hệ thống\nconst WHITELIST = {\n    \"ESP32_SMOKE_N04_A01\": { \n        mac: \"24:6F:28:AB:CD:10\", \n        token: \"HUIT_IOT_SECURE_TOKEN_N04\", \n        topology: { building: \"HUIT_A\", floor: \"F03\", room: \"P302\", zone: \"Phòng Lab IoT\" }\n    },\n    \"ESP32_SMOKE_N04_A02\": { \n        mac: \"24:6F:28:AB:CD:20\", \n        token: \"HUIT_IOT_SECURE_TOKEN_N04\", \n        topology: { building: \"HUIT_A\", floor: \"F03\", room: \"P303\", zone: \"Kho Hóa Chất\" }\n    },\n    \"ESP32_SMOKE_N04_A03\": { \n        mac: \"24:6F:28:AB:CD:30\", \n        token: \"HUIT_IOT_SECURE_TOKEN_N04\", \n        topology: { building: \"HUIT_A\", floor: \"F03\", room: \"P304\", zone: \"Khu Vực Bếp\" }\n    }\n};\n\nlet data = msg.payload;\nif (typeof data === 'string') {\n    try { data = JSON.parse(data); } catch(e) { return null; }\n}\n\nlet devId = data.device_id || \"UNKNOWN\";\nlet devMac = data.mac_address || \"\";\nlet secret = data.secret_token || \"\";\n\nlet respTopic = \"smoke/v2/auth/response/\" + devId;\nlet respPayload = {};\nlet logEntry = null;\n\n// Kiểm tra tính hợp lệ trong Whitelist\nlet record = WHITELIST[devId];\nif (record && record.token === secret) {\n    let sessionKey = \"SK_\" + Math.random().toString(36).substr(2, 9).toUpperCase() + \"_N04\";\n    respPayload = {\n        msg_id: \"RESP-AUTH-\" + Date.now(),\n        status: \"PASS\",\n        status_code: 200,\n        session_key: sessionKey,\n        lease_duration_sec: 86400,\n        assigned_topology: record.topology,\n        config: {\n            telemetry_interval_ms: 2000,\n            keep_alive_interval_ms: 10000,\n            alarm_threshold_ppm: 400.0,\n            safe_threshold_ppm: 300.0\n        }\n    };\n\n    // Đăng ký vào bảng Device Fleet Registry\n    let fleet = flow.get(\"device_fleet\") || {};\n    fleet[devId] = {\n        deviceId: devId,\n        mac: devMac,\n        zone: record.topology.zone,\n        topology: record.topology,\n        sessionKey: sessionKey,\n        status: \"ONLINE\",\n        fsmState: \"SAFE\",\n        lastSeen: Date.now(),\n        ppm: 0,\n        temp: 28.0,\n        freeHeap: 180000,\n        rssi: -60\n    };\n    flow.set(\"device_fleet\", fleet);\n\n    logEntry = { level: \"INFO\", event: \"AUTH_SUCCESS\", desc: `Xác thực thành công thiết bị ${devId} (${record.topology.zone})` };\n} else {\n    respPayload = {\n        msg_id: \"RESP-AUTH-\" + Date.now(),\n        status: \"REJECTED\",\n        status_code: 401,\n        error_code: \"ERR_UNAUTHORIZED_DEVICE\",\n        message: \"Device MAC or secret token is invalid.\"\n    };\n    logEntry = { level: \"WARN\", event: \"AUTH_REJECTED\", desc: `Từ chối xác thực thiết bị lạ: ID=${devId}, MAC=${devMac}` };\n}\n\nlet outMqtt = {\n    topic: respTopic,\n    payload: JSON.stringify(respPayload),\n    qos: 1\n};\n\nlet outLog = logEntry ? { payload: [logEntry] } : null;\n\nreturn [outMqtt, outLog];",
+    "outputs": 2,
+    "noerr": 0,
+    "x": 490,
+    "y": 80,
+    "wires": [
+      [
+        "mqtt_out_auth_resp"
+      ],
+      [
+        "fn_audit_logger"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_out_auth_resp",
+    "type": "mqtt out",
+    "z": "tab_middleware_smoke",
+    "name": "Pub (1d): smoke/v2/auth/response",
+    "topic": "",
+    "qos": "1",
+    "retain": "false",
+    "broker": "broker_emqx_cloud",
+    "x": 840,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "mqtt_in_telemetry_v1",
+    "type": "mqtt in",
+    "z": "tab_middleware_smoke",
+    "name": "Sub V1: smoke/telemetry",
+    "topic": "smoke/telemetry",
+    "qos": "0",
+    "datatype": "auto-detect",
+    "broker": "broker_emqx_cloud",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 160,
+    "y": 160,
+    "wires": [
+      [
+        "fn_parse_telemetry"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_in_telemetry_v2",
+    "type": "mqtt in",
+    "z": "tab_middleware_smoke",
+    "name": "Sub (2a): smoke/v2/+/+/+/+/telemetry",
+    "topic": "smoke/v2/+/+/+/+/telemetry",
+    "qos": "0",
+    "datatype": "auto-detect",
+    "broker": "broker_emqx_cloud",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 200,
+    "y": 220,
+    "wires": [
+      [
+        "fn_parse_telemetry"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_in_alarm_v1",
+    "type": "mqtt in",
+    "z": "tab_middleware_smoke",
+    "name": "Sub V1: smoke/event/alarm",
+    "topic": "smoke/event/alarm",
+    "qos": "1",
+    "datatype": "auto-detect",
+    "broker": "broker_emqx_cloud",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 170,
+    "y": 280,
+    "wires": [
+      [
+        "fn_parse_alarm"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_in_alarm_v2",
+    "type": "mqtt in",
+    "z": "tab_middleware_smoke",
+    "name": "Sub (2a): smoke/v2/+/+/+/+/event/alarm",
+    "topic": "smoke/v2/+/+/+/+/event/alarm",
+    "qos": "1",
+    "datatype": "auto-detect",
+    "broker": "broker_emqx_cloud",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 210,
+    "y": 340,
+    "wires": [
+      [
+        "fn_parse_alarm"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_in_history_sync",
+    "type": "mqtt in",
+    "z": "tab_middleware_smoke",
+    "name": "Sub (Abnormal 2): smoke/history/sync",
+    "topic": "smoke/history/sync",
+    "qos": "1",
+    "datatype": "auto-detect",
+    "broker": "broker_emqx_cloud",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 200,
+    "y": 400,
+    "wires": [
+      [
+        "fn_parse_history_sync"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_in_keepalive_v1",
+    "type": "mqtt in",
+    "z": "tab_middleware_smoke",
+    "name": "Sub V1: smoke/keep_alive",
+    "topic": "smoke/keep_alive",
+    "qos": "0",
+    "datatype": "auto-detect",
+    "broker": "broker_emqx_cloud",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 170,
+    "y": 460,
+    "wires": [
+      [
+        "fn_parse_keepalive"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_in_keepalive_v2",
+    "type": "mqtt in",
+    "z": "tab_middleware_smoke",
+    "name": "Sub (4a): smoke/v2/+/+/+/+/keep_alive",
+    "topic": "smoke/v2/+/+/+/+/keep_alive",
+    "qos": "0",
+    "datatype": "auto-detect",
+    "broker": "broker_emqx_cloud",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 200,
+    "y": 510,
+    "wires": [
+      [
+        "fn_parse_keepalive"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_in_lwt",
+    "type": "mqtt in",
+    "z": "tab_middleware_smoke",
+    "name": "Sub: smoke/lwt",
+    "topic": "smoke/lwt",
+    "qos": "1",
+    "datatype": "auto-detect",
+    "broker": "broker_emqx_cloud",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 130,
+    "y": 560,
+    "wires": [
+      [
+        "fn_parse_lwt"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_in_scheduler",
+    "type": "mqtt in",
+    "z": "tab_middleware_smoke",
+    "name": "Sub (Rule 3): smoke/cmd/scheduler",
+    "topic": "smoke/cmd/scheduler",
+    "qos": "1",
+    "datatype": "auto-detect",
+    "broker": "broker_emqx_cloud",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 190,
+    "y": 610,
+    "wires": [
+      [
+        "fn_parse_scheduler"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_in_fault_injection",
+    "type": "mqtt in",
+    "z": "tab_middleware_smoke",
+    "name": "Sub (Fault Inject): smoke/cmd/inject_fault",
+    "topic": "smoke/cmd/inject_fault",
+    "qos": "1",
+    "datatype": "auto-detect",
+    "broker": "broker_emqx_cloud",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 210,
+    "y": 660,
+    "wires": [
+      [
+        "fn_parse_fault_injection"
+      ]
+    ]
+  },
+  {
+    "id": "inject_watchdog_tick",
+    "type": "inject",
+    "z": "tab_middleware_smoke",
+    "name": "Watchdog 3s Tick (Abnormal 3)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "3",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 1,
+    "topic": "watchdog/tick",
+    "payload": "",
+    "payloadType": "date",
+    "x": 170,
+    "y": 710,
+    "wires": [
+      [
+        "fn_watchdog_scheduler"
+      ]
+    ]
+  },
+  {
+    "id": "fn_parse_telemetry",
+    "type": "function",
+    "z": "tab_middleware_smoke",
+    "name": "Parse & Validate Telemetry",
+    "func": "let data = msg.payload;\nif (typeof data === 'string') {\n    try { data = JSON.parse(data); } catch(e) { return null; }\n}\n\nmsg.eventType = \"TELEMETRY\";\nmsg.deviceId = data.device_id || \"ESP32_SMOKE_N04_A01\";\nmsg.ppm = parseFloat(data.mq2_ppm || data.ppm || 0);\nmsg.temp = parseFloat(data.temp || data.temperature_c || 28.0);\nmsg.hum = parseFloat(data.hum || data.humidity_pct || 60.0);\nmsg.deviceFan = data.fan || \"OFF\";\nmsg.deviceMode = data.mode || \"AUTO\";\nmsg.fsmState = data.fsm_state || \"SAFE\";\nmsg.timestamp = Date.now();\n\nreturn msg;",
+    "outputs": 1,
+    "x": 520,
+    "y": 180,
+    "wires": [
+      [
+        "fn_core_fsm_engine"
+      ]
+    ]
+  },
+  {
+    "id": "fn_parse_alarm",
+    "type": "function",
+    "z": "tab_middleware_smoke",
+    "name": "Parse Urgent Alarm Event",
+    "func": "let data = msg.payload;\nif (typeof data === 'string') {\n    try { data = JSON.parse(data); } catch(e) { return null; }\n}\n\nmsg.eventType = \"URGENT_ALARM\";\nmsg.deviceId = data.device_id || \"ESP32_SMOKE_N04_A01\";\nmsg.ppm = parseFloat(data.ppm || data.mq2_ppm || 450);\nmsg.severity = data.severity || \"CRITICAL\";\nmsg.timestamp = Date.now();\n\nreturn msg;",
+    "outputs": 1,
+    "x": 520,
+    "y": 300,
+    "wires": [
+      [
+        "fn_core_fsm_engine"
+      ]
+    ]
+  },
+  {
+    "id": "fn_parse_history_sync",
+    "type": "function",
+    "z": "tab_middleware_smoke",
+    "name": "Parse Offline Buffer Sync (Abnormal 2)",
+    "func": "let data = msg.payload;\nif (typeof data === 'string') {\n    try { data = JSON.parse(data); } catch(e) { return null; }\n}\n\nmsg.eventType = \"OFFLINE_SYNC\";\nmsg.syncSeq = data.sync_seq || 1;\nmsg.ppm = parseFloat(data.mq2_ppm || data.ppm || 0);\nmsg.temp = parseFloat(data.temp || 28.0);\nmsg.fan = data.fan || \"OFF\";\nmsg.recordState = data.state || \"SAFE\";\nmsg.timestamp = Date.now();\n\nreturn msg;",
+    "outputs": 1,
+    "x": 540,
+    "y": 400,
+    "wires": [
+      [
+        "fn_core_fsm_engine"
+      ]
+    ]
+  },
+  {
+    "id": "fn_parse_keepalive",
+    "type": "function",
+    "z": "tab_middleware_smoke",
+    "name": "Dịch vụ 4: Parse Keep-Alive",
+    "func": "let data = msg.payload;\nif (typeof data === 'string') {\n    try { data = JSON.parse(data); } catch(e) { return null; }\n}\n\nmsg.eventType = \"KEEP_ALIVE\";\nmsg.deviceId = data.device_id || \"ESP32_SMOKE_N04_A01\";\nmsg.uptimeSec = data.uptime_sec || 0;\nmsg.freeHeap = data.free_heap_bytes || 180000;\nmsg.wifiRssi = data.wifi_rssi_dbm || -60;\nmsg.status = data.status || \"HEALTHY\";\nmsg.timestamp = Date.now();\n\nreturn msg;",
+    "outputs": 1,
+    "x": 520,
+    "y": 480,
+    "wires": [
+      [
+        "fn_core_fsm_engine"
+      ]
+    ]
+  },
+  {
+    "id": "fn_parse_lwt",
+    "type": "function",
+    "z": "tab_middleware_smoke",
+    "name": "Parse LWT Signal",
+    "func": "let status = (typeof msg.payload === 'string') ? msg.payload.trim().toLowerCase() : \"\";\nmsg.eventType = \"LWT\";\nmsg.isOnline = (status === \"online\");\nmsg.deviceId = \"ESP32_SMOKE_N04_A01\";\nmsg.timestamp = Date.now();\nreturn msg;",
+    "outputs": 1,
+    "x": 500,
+    "y": 560,
+    "wires": [
+      [
+        "fn_core_fsm_engine"
+      ]
+    ]
+  },
+  {
+    "id": "fn_parse_scheduler",
+    "type": "function",
+    "z": "tab_middleware_smoke",
+    "name": "Parse Scheduler Cmd (Rule 3)",
+    "func": "let data = msg.payload;\nif (typeof data === 'string') {\n    try { data = JSON.parse(data); } catch(e) { data = { mode: data }; }\n}\nmsg.eventType = \"SCHEDULER_CMD\";\nmsg.mode = data.mode || \"DAY\";\nmsg.timestamp = Date.now();\nreturn msg;",
+    "outputs": 1,
+    "x": 530,
+    "y": 620,
+    "wires": [
+      [
+        "fn_core_fsm_engine"
+      ]
+    ]
+  },
+  {
+    "id": "fn_parse_fault_injection",
+    "type": "function",
+    "z": "tab_middleware_smoke",
+    "name": "Parse Fault Injection (Abnormal Sandbox)",
+    "func": "let data = msg.payload;\nif (typeof data === 'string') {\n    try { data = JSON.parse(data); } catch(e) { data = { fault: data }; }\n}\nmsg.eventType = \"FAULT_INJECTION_CMD\";\nmsg.fault = data.fault || \"NONE\";\nmsg.timestamp = Date.now();\nreturn msg;",
+    "outputs": 1,
+    "x": 550,
+    "y": 670,
+    "wires": [
+      [
+        "fn_core_fsm_engine"
+      ]
+    ]
+  },
+  {
+    "id": "fn_watchdog_scheduler",
+    "type": "function",
+    "z": "tab_middleware_smoke",
+    "name": "Watchdog 3s Tick Trigger",
+    "func": "msg.eventType = \"WATCHDOG_TICK\";\nmsg.timestamp = Date.now();\nreturn msg;",
+    "outputs": 1,
+    "x": 520,
+    "y": 720,
+    "wires": [
+      [
+        "fn_core_fsm_engine"
+      ]
+    ]
+  },
+  {
+    "id": "fn_core_fsm_engine",
+    "type": "function",
+    "z": "tab_middleware_smoke",
+    "name": "Core Engine: FSM, 5 Rules & Abnormal Scenarios",
+    "func": "/**\n * TẦNG 3 - MIDDLEWARE AUTOMATION ENGINE (TUẦN 7: BUSINESS RULES & ABNORMAL SCENARIOS)\n * Hỗ trợ hạm đội đa thiết bị, FSM 6 trạng thái, 5 Business Rules, 4 Kịch bản Sự cố Bất thường\n */\n\nlet state = flow.get(\"fsm_state\") || \"SAFE\";\nlet sensitivityMode = flow.get(\"sensitivity_mode\") || \"DAY\";\nlet lastSeen = flow.get(\"last_seen\") || 0;\nlet lastAlertTime = flow.get(\"last_alert_time\") || 0;\nlet cooldownStartTime = flow.get(\"cooldown_start\") || null;\nlet lastTemp = flow.get(\"last_temp\") || 28.0;\nlet lastTempTime = flow.get(\"last_temp_time\") || Date.now();\nlet smokeSpikeStartTime = flow.get(\"smoke_spike_start\") || null;\nlet fanCmdState = flow.get(\"fan_cmd_state\") || \"OFF\";\nlet buzzerCmdState = flow.get(\"buzzer_cmd_state\") || \"OFF\";\nlet activeFaultCode = flow.get(\"active_fault_code\") || \"NONE\";\n\nlet fleet = flow.get(\"device_fleet\") || {\n    \"ESP32_SMOKE_N04_A01\": {\n        deviceId: \"ESP32_SMOKE_N04_A01\",\n        zone: \"Phòng Lab IoT (P302)\",\n        status: \"ONLINE\",\n        fsmState: \"SAFE\",\n        lastSeen: Date.now(),\n        ppm: 145.0,\n        temp: 28.5,\n        freeHeap: 182400,\n        rssi: -58\n    }\n};\n\nlet now = Date.now();\n\n// Rule 3: Dynamic Threshold Scheduler (Ngưỡng Ngày / Đêm thích ứng)\nlet currentHour = new Date().getHours();\nlet isNight = (sensitivityMode === \"NIGHT\") || (currentHour >= 22 || currentHour < 6);\nlet ALARM_THRESHOLD = isNight ? 350.0 : 400.0;\nlet SAFE_THRESHOLD = isNight ? 250.0 : 300.0;\nconst COOLDOWN_PURGE_DURATION_MS = 30000; // Rule 4: 30s Post-Alarm Purge Delay\nconst WATCHDOG_TIMEOUT_MS = 30000;       // Abnormal 3: 30s Watchdog (3 missed keep-alives)\nconst ALERT_RATE_LIMIT_MS = 20000;\n\nlet commands = [];\nlet logs = [];\nlet uiUpdates = {};\nlet alertMessage = null;\n\n// ==========================================\n// 1. XỬ LÝ LỆNH SCHEDULER & FAULT INJECTION\n// ==========================================\nif (msg.eventType === \"SCHEDULER_CMD\") {\n    let mode = (msg.mode || \"DAY\").toUpperCase();\n    sensitivityMode = mode;\n    flow.set(\"sensitivity_mode\", sensitivityMode);\n    logs.push({ level: \"INFO\", event: \"RULE_3_SCHEDULER_CHANGED\", desc: `Cập nhật Scheduler: Chế độ ${mode} (Alarm: ${mode===\"NIGHT\"?350:400} PPM, Safe: ${mode===\"NIGHT\"?250:300} PPM)` });\n}\n\nif (msg.eventType === \"FAULT_INJECTION_CMD\") {\n    let fType = msg.fault || \"NONE\";\n    activeFaultCode = fType;\n    if (fType === \"CLEAR\" || fType === \"RESTORE\") {\n        activeFaultCode = \"NONE\";\n        if (state === \"FAULT\") state = \"SAFE\";\n        logs.push({ level: \"INFO\", event: \"FAULT_CLEARED\", desc: \"Đã xóa toàn bộ lỗi giả lập. Hệ thống trở về SAFE.\" });\n    } else {\n        state = \"FAULT\";\n        logs.push({ level: \"ERROR\", event: \"ABNORMAL_SIMULATED\", desc: `Kích hoạt sự cố giả lập: ${fType} -> Chuyển sang FAIL-SAFE Mode` });\n    }\n}\n\n// ==========================================\n// 2. XỬ LÝ OFFLINE BUFFER SYNC (ABNORMAL SCENARIO 2)\n// ==========================================\nif (msg.eventType === \"OFFLINE_SYNC\") {\n    logs.push({\n        level: \"INFO\",\n        event: \"OFFLINE_REPLAY_SYNC\",\n        desc: `Đồng bộ bản ghi ngoại tuyến seq=${msg.syncSeq}: PPM=${msg.ppm}, Temp=${msg.temp}°C, Fan=${msg.fan}, Trạng thái=${msg.recordState}`\n    });\n}\n\n// ==========================================\n// 3. XỬ LÝ KEEP-ALIVE & WATCHDOG (ABNORMAL SCENARIO 3)\n// ==========================================\nif (msg.eventType === \"KEEP_ALIVE\") {\n    let devId = msg.deviceId;\n    lastSeen = now;\n    if (state === \"OFFLINE\") state = \"SAFE\";\n\n    if (!fleet[devId]) {\n        fleet[devId] = { deviceId: devId, zone: \"Khu Vực Chung\", status: \"ONLINE\", fsmState: \"SAFE\" };\n    }\n    fleet[devId].lastSeen = now;\n    fleet[devId].status = \"ONLINE\";\n    fleet[devId].freeHeap = msg.freeHeap;\n    fleet[devId].rssi = msg.wifiRssi;\n\n    if (msg.status === \"FAULT\") {\n        state = \"FAULT\";\n        activeFaultCode = \"HARDWARE_REPORTED_FAULT\";\n        logs.push({ level: \"ERROR\", event: \"HARDWARE_FAULT\", desc: `Thiết bị ${devId} báo lỗi phần cứng trong gói tin Heartbeat!` });\n    }\n\n    logs.push({ level: \"INFO\", event: \"KEEP_ALIVE_PONG\", desc: `Tín hiệu Keep-Alive từ ${devId} (Heap: ${msg.freeHeap}B, RSSI: ${msg.wifiRssi}dBm)` });\n}\n\nif (msg.eventType === \"WATCHDOG_TICK\") {\n    for (let dId in fleet) {\n        let dev = fleet[dId];\n        if (dev.status !== \"OFFLINE\" && (now - dev.lastSeen > WATCHDOG_TIMEOUT_MS)) {\n            dev.status = \"OFFLINE\";\n            logs.push({\n                level: \"CRITICAL\",\n                event: \"WATCHDOG_DEAD_DEVICE\",\n                desc: `CẢNH BÁO: Thiết bị ${dId} mất nhịp tim liên tiếp quá 30s! Kích hoạt quy trình cảnh báo Dead Device!`\n            });\n            alertMessage = {\n                title: \"🚨 BÁO ĐỘNG ĐỘT TỬ THIẾT BỊ (WATCHDOG)\",\n                device: dId,\n                desc: \"Thiết bị mất liên lạc > 30s. Nguy cơ mất an toàn PCCC!\"\n            };\n        }\n    }\n    if (state !== \"OFFLINE\" && lastSeen > 0 && (now - lastSeen > WATCHDOG_TIMEOUT_MS)) {\n        state = \"OFFLINE\";\n    }\n}\n\n// ==========================================\n// 4. XỬ LÝ TELEMETRY & 5 BUSINESS RULES\n// ==========================================\nif (msg.eventType === \"TELEMETRY\" || msg.eventType === \"URGENT_ALARM\") {\n    let devId = msg.deviceId;\n    lastSeen = now;\n    if (state === \"OFFLINE\") state = \"SAFE\";\n\n    let ppm = msg.ppm || 0;\n    let temp = msg.temp || 28.0;\n    let hum = msg.hum || 60.0;\n\n    // Abnormal 1: Phát hiện bất thường cảm biến (MQ-2 ADC sat day hoac DHT NaN)\n    if (ppm > 5000.0 || temp < -10.0 || temp > 100.0) {\n        state = \"FAULT\";\n        activeFaultCode = \"SENSOR_ANOMALY_OUT_OF_RANGE\";\n        logs.push({ level: \"ERROR\", event: \"SENSOR_MALFUNCTION\", desc: `Số đo cảm biến vượt giới hạn vật lý (PPM=${ppm}, Temp=${temp}°C)!` });\n    }\n\n    // Tính gia tốc tăng nhiệt độ dT/dt (°C / phút)\n    let dtMinutes = (now - lastTempTime) / 60000.0;\n    let rateOfRise = (dtMinutes > 0.05) ? ((temp - lastTemp) / dtMinutes) : 0.0;\n    lastTemp = temp;\n    lastTempTime = now;\n\n    if (!fleet[devId]) {\n        fleet[devId] = { deviceId: devId, zone: \"Khu Vực Tầng 3\", status: \"ONLINE\", fsmState: \"SAFE\" };\n    }\n    fleet[devId].lastSeen = now;\n    fleet[devId].ppm = ppm;\n    fleet[devId].temp = temp;\n    fleet[devId].status = \"ONLINE\";\n\n    uiUpdates = { ppm: ppm, temp: temp, hum: hum, rateOfRise: rateOfRise };\n\n    // RULE 1: Multi-Sensor Correlation (Tương quan Đa cảm biến: Khói + Gia tốc nhiệt)\n    let isRealFire = (ppm >= ALARM_THRESHOLD) && (rateOfRise >= 3.0 || temp >= 50.0);\n    \n    // RULE 2: False Alarm / Transient Smoke Spike Suppression (Lọc khói thoáng qua)\n    let isTransientSmoke = (ppm >= ALARM_THRESHOLD) && (temp < 35.0) && (!isRealFire);\n\n    if (isRealFire) {\n        state = \"ALARM\";\n        cooldownStartTime = null;\n        smokeSpikeStartTime = null;\n        logs.push({\n            level: \"CRITICAL\",\n            event: \"REAL_FIRE_CONFIRMED\",\n            desc: `HỎA HOẠN THỰC SỰ: Khói ${ppm.toFixed(1)} PPM kèm nhiệt độ tăng vọt (${rateOfRise.toFixed(1)}°C/min hoặc ${temp.toFixed(1)}°C)! Kích hoạt FULL ALARM ngay!`\n        });\n        commands.push({ topic: \"smoke/cmd/fan\", payload: { action: \"ON\", reason: \"RULE_1_REAL_FIRE\" } });\n        commands.push({ topic: \"smoke/cmd/buzzer\", payload: { action: \"UNMUTE\", reason: \"RULE_1_REAL_FIRE\" } });\n        \n        // RULE 5: Cross-Zone Broadcast khi khói >= 600 PPM\n        if (ppm >= 600.0) {\n            logs.push({ level: \"CRITICAL\", event: \"CROSS_ZONE_BROADCAST\", desc: `Khói mức ĐẠI NGUY HIỂM (${ppm.toFixed(1)} PPM). Kích hoạt còi toàn bộ Hành lang Tầng 3 (Zone F03)!` });\n            commands.push({ topic: \"smoke/v2/HUIT_A/F03/+/cmd/buzzer\", payload: { cmd_id: \"CMD-ZONE-EVACUATION\", action: \"UNMUTE\", priority: \"CRITICAL\" } });\n        }\n\n        if (now - lastAlertTime > ALERT_RATE_LIMIT_MS) {\n            alertMessage = { title: \"🔥 CHÁY THỰC SỰ ĐƯỢC XÁC NHẬN!\", ppm: ppm, temp: temp, rateOfRise: rateOfRise, device: devId };\n            lastAlertTime = now;\n        }\n    } else if (isTransientSmoke) {\n        if (!smokeSpikeStartTime) smokeSpikeStartTime = now;\n        let spikeDuration = (now - smokeSpikeStartTime) / 1000;\n        \n        if (spikeDuration < 10) {\n            // Lọc khói thoáng qua: Chỉ bật quạt thông gió, ngắt còi tránh hoảng loạn\n            logs.push({\n                level: \"WARN\",\n                event: \"TRANSIENT_SMOKE_SUPPRESSED\",\n                desc: `Khói tăng ${ppm.toFixed(1)} PPM nhưng nhiệt độ bình thường (${temp.toFixed(1)}°C, thời gian ${spikeDuration.toFixed(1)}s < 10s). Bật quạt thông gió, không hú còi.`\n            });\n            commands.push({ topic: \"smoke/cmd/fan\", payload: { action: \"ON\", reason: \"RULE_2_PURGE_VENTILATION\" } });\n            commands.push({ topic: \"smoke/cmd/buzzer\", payload: { action: \"MUTE\", reason: \"RULE_2_SUPPRESSION\" } });\n            state = \"WARNING\";\n        } else {\n            // Khói duy trì > 10s -> Nâng lên ALARM\n            state = \"ALARM\";\n            commands.push({ topic: \"smoke/cmd/buzzer\", payload: { action: \"UNMUTE\", reason: \"PERSISTENT_SMOKE\" } });\n        }\n    } else if (ppm >= ALARM_THRESHOLD) {\n        state = \"ALARM\";\n        cooldownStartTime = null;\n        commands.push({ topic: \"smoke/cmd/fan\", payload: { action: \"ON\", reason: \"STANDARD_ALARM\" } });\n        commands.push({ topic: \"smoke/cmd/buzzer\", payload: { action: \"UNMUTE\", reason: \"STANDARD_ALARM\" } });\n    }\n    // RULE 4: Cooldown Purge Hysteresis (30s)\n    else if (state === \"ALARM\" && ppm <= SAFE_THRESHOLD) {\n        state = \"COOLDOWN\";\n        cooldownStartTime = now;\n        smokeSpikeStartTime = null;\n        logs.push({\n            level: \"INFO\",\n            event: \"RULE_4_COOLDOWN_PURGE_STARTED\",\n            desc: `Khói đã hạ về mức an toàn (${ppm.toFixed(1)} <= ${SAFE_THRESHOLD} PPM). Kích hoạt thông gió cưỡng bức trễ 30s!`\n        });\n        commands.push({ topic: \"smoke/cmd/buzzer\", payload: { action: \"MUTE\", reason: \"COOLDOWN_SAFE\" } });\n    }\n    else if (state === \"COOLDOWN\") {\n        if (ppm >= SAFE_THRESHOLD) {\n            state = \"ALARM\";\n            cooldownStartTime = null;\n            logs.push({ level: \"WARN\", event: \"COOLDOWN_ABORTED\", desc: \"Khói tăng trở lại trong lúc Cooldown! Tái kích hoạt ALARM.\" });\n        } else if (now - cooldownStartTime >= COOLDOWN_PURGE_DURATION_MS) {\n            state = \"SAFE\";\n            cooldownStartTime = null;\n            logs.push({ level: \"INFO\", event: \"RULE_4_PURGE_COMPLETED\", desc: \"Hoàn tất 30s thông gió cưỡng bức. Trả quạt về trạng thái IDLE an toàn.\" });\n            commands.push({ topic: \"smoke/cmd/fan\", payload: { action: \"OFF\", reason: \"PURGE_COMPLETED\" } });\n        }\n    } else if (state === \"SAFE\" && ppm >= 250.0 && ppm < ALARM_THRESHOLD) {\n        state = \"WARNING\";\n    } else if (state === \"WARNING\" && ppm < 250.0 && temp < 50.0) {\n        state = \"SAFE\";\n    }\n\n    fleet[devId].fsmState = state;\n}\n\n// Lưu Context\nflow.set(\"fsm_state\", state);\nflow.set(\"device_fleet\", fleet);\nflow.set(\"last_seen\", lastSeen);\nflow.set(\"last_alert_time\", lastAlertTime);\nflow.set(\"cooldown_start\", cooldownStartTime);\nflow.set(\"last_temp\", lastTemp);\nflow.set(\"last_temp_time\", lastTempTime);\nflow.set(\"smoke_spike_start\", smokeSpikeStartTime);\nflow.set(\"active_fault_code\", activeFaultCode);\nflow.set(\"fan_cmd_state\", fanCmdState);\nflow.set(\"buzzer_cmd_state\", buzzerCmdState);\n\n// Lưu vào mảng Lịch sử sự kiện (Circular Buffer 50 mục)\nlet eventHistory = flow.get(\"event_history\") || [];\nfor (let lg of logs) {\n    eventHistory.unshift({\n        time: new Date().toLocaleTimeString('vi-VN') + \" \" + new Date().toLocaleDateString('vi-VN'),\n        level: lg.level,\n        event: lg.event,\n        desc: lg.desc,\n        fsmState: state\n    });\n}\nif (eventHistory.length > 50) eventHistory = eventHistory.slice(0, 50);\nflow.set(\"event_history\", eventHistory);\n\n// Output: Commands, Logs, UI Updates, Alerts\nlet outCommands = (commands.length > 0) ? commands.map(c => ({ topic: c.topic, payload: JSON.stringify(c.payload), qos: 1 })) : null;\nlet outLogs = (logs.length > 0) ? { payload: logs, eventHistory: eventHistory } : null;\n\nlet outUI = {\n    payload: {\n        fsmState: state,\n        sensitivityMode: sensitivityMode,\n        alarmThreshold: ALARM_THRESHOLD,\n        activeFaultCode: activeFaultCode,\n        cooldownRemaining: cooldownStartTime ? Math.max(0, Math.ceil((COOLDOWN_PURGE_DURATION_MS - (now - cooldownStartTime))/1000)) : 0,\n        fleetList: Object.values(fleet),\n        ...uiUpdates\n    }\n};\n\nlet outAlert = alertMessage ? { payload: alertMessage } : null;\n\nreturn [outCommands, outLogs, outUI, outAlert];",
+    "outputs": 4,
+    "noerr": 0,
+    "x": 860,
+    "y": 420,
+    "wires": [
+      [
+        "fn_command_dispatcher"
+      ],
+      [
+        "fn_audit_logger"
+      ],
+      [
+        "fn_ui_dashboard_adapter"
+      ],
+      [
+        "debug_alert_notifications"
+      ]
+    ]
+  },
+  {
+    "id": "fn_command_dispatcher",
+    "type": "function",
+    "z": "tab_middleware_smoke",
+    "name": "Dịch vụ 3: Command Dispatcher (3a)",
+    "func": "return [msg];",
+    "outputs": 1,
+    "x": 1140,
+    "y": 380,
+    "wires": [
+      [
+        "router_mqtt_downlink"
+      ]
+    ]
+  },
+  {
+    "id": "router_mqtt_downlink",
+    "type": "switch",
+    "z": "tab_middleware_smoke",
+    "name": "Route by Downlink Topic",
+    "property": "topic",
+    "propertyType": "msg",
+    "rules": [
+      {
+        "t": "cont",
+        "v": "/cmd/fan",
+        "vt": "str"
+      },
+      {
+        "t": "cont",
+        "v": "/cmd/buzzer",
+        "vt": "str"
+      }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 2,
+    "x": 1150,
+    "y": 460,
+    "wires": [
+      [
+        "mqtt_out_fan_downlink",
+        "debug_cmd_sent"
+      ],
+      [
+        "mqtt_out_buzzer_downlink",
+        "debug_cmd_sent"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_out_fan_downlink",
+    "type": "mqtt out",
+    "z": "tab_middleware_smoke",
+    "name": "Downlink: smoke/cmd/fan",
+    "topic": "smoke/cmd/fan",
+    "qos": "1",
+    "retain": "false",
+    "broker": "broker_emqx_cloud",
+    "x": 1410,
+    "y": 440,
+    "wires": []
+  },
+  {
+    "id": "mqtt_out_buzzer_downlink",
+    "type": "mqtt out",
+    "z": "tab_middleware_smoke",
+    "name": "Downlink: smoke/cmd/buzzer",
+    "topic": "smoke/cmd/buzzer",
+    "qos": "1",
+    "retain": "false",
+    "broker": "broker_emqx_cloud",
+    "x": 1420,
+    "y": 500,
+    "wires": []
+  },
+  {
+    "id": "debug_cmd_sent",
+    "type": "debug",
+    "z": "tab_middleware_smoke",
+    "name": "Command Sent Log",
+    "active": true,
+    "tosidebar": true,
+    "complete": "payload",
+    "x": 1390,
+    "y": 560,
+    "wires": []
+  },
+  {
+    "id": "fn_audit_logger",
+    "type": "function",
+    "z": "tab_middleware_smoke",
+    "name": "Multi-tier Audit Trail Logger",
+    "func": "let payload = msg.payload || [];\nlet history = msg.eventHistory || [];\nreturn [{ payload: { recentLogs: payload, history: history } }];",
+    "outputs": 1,
+    "x": 1140,
+    "y": 280,
+    "wires": [
+      [
+        "debug_audit_log"
+      ]
+    ]
+  },
+  {
+    "id": "debug_audit_log",
+    "type": "debug",
+    "z": "tab_middleware_smoke",
+    "name": "Audit Trail Console",
+    "active": true,
+    "tosidebar": true,
+    "complete": "payload",
+    "x": 1390,
+    "y": 280,
+    "wires": []
+  },
+  {
+    "id": "fn_ui_dashboard_adapter",
+    "type": "function",
+    "z": "tab_middleware_smoke",
+    "name": "Dashboard State Adapter",
+    "func": "return [msg];",
+    "outputs": 1,
+    "x": 1130,
+    "y": 620,
+    "wires": [
+      [
+        "debug_dashboard_state"
+      ]
+    ]
+  },
+  {
+    "id": "debug_dashboard_state",
+    "type": "debug",
+    "z": "tab_middleware_smoke",
+    "name": "Dashboard UI Feed",
+    "active": true,
+    "tosidebar": true,
+    "complete": "payload",
+    "x": 1380,
+    "y": 620,
+    "wires": []
+  },
+  {
+    "id": "debug_alert_notifications",
+    "type": "debug",
+    "z": "tab_middleware_smoke",
+    "name": "Telegram & Web Alert Dispatcher",
+    "active": true,
+    "tosidebar": true,
+    "complete": "payload",
+    "x": 1160,
+    "y": 700,
+    "wires": []
+  },
+  {
+    "id": "ui_tab_smoke_monitor",
+    "type": "ui_tab",
+    "name": "Báo Khói Cảnh Báo Sớm - Tuần 7",
+    "icon": "dashboard",
+    "order": 1
+  },
+  {
+    "id": "ui_grp_gauges",
+    "type": "ui_group",
+    "name": "Thông số Cảm biến Môi trường",
+    "tab": "ui_tab_smoke_monitor",
+    "order": 1,
+    "disp": true,
+    "width": "12"
+  },
+  {
+    "id": "ui_grp_state",
+    "type": "ui_group",
+    "name": "Máy trạng thái FSM 6 Trạng thái & Tuần 7 Rules",
+    "tab": "ui_tab_smoke_monitor",
+    "order": 2,
+    "disp": true,
+    "width": "12"
+  },
+  {
+    "id": "ui_grp_controls",
+    "type": "ui_group",
+    "name": "Tầng 4: Điều khiển Chấp hành & Cảnh báo từ xa",
+    "tab": "ui_tab_smoke_monitor",
+    "order": 3,
+    "disp": true,
+    "width": "12"
+  },
+  {
+    "id": "ui_grp_fleet",
+    "type": "ui_group",
+    "name": "Quản trị Hạm đội Thiết bị (Fleet Registry)",
+    "tab": "ui_tab_smoke_monitor",
+    "order": 4,
+    "disp": true,
+    "width": "12"
+  },
+  {
+    "id": "ui_grp_rules",
+    "type": "ui_group",
+    "name": "Bảng Điều phối Business Rules & Abnormal Sandbox",
+    "tab": "ui_tab_smoke_monitor",
+    "order": 5,
+    "disp": true,
+    "width": "12"
+  }
+]

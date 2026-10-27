@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Fire Safety SCADA | Tầng 4 Application - Nhóm 04 HUIT</title>
+  <meta name="description" content="Trung tâm Giám sát và Điều hành An toàn PCCC Thông minh - Hệ thống SCADA Tầng 4 Application">
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- MQTT.js for Browser WebSocket Client -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <!-- Chart.js for Live Telemetry Graphs -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="style.css?v=light_academic_v2">
+</head>
+<body>
+
+  <!-- TOP NAVIGATION BAR (SCADA SUPERVISORY HEADER) -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="brand-logo">
+        <div class="brand-icon-box">
+          <!-- Industrial Fire Safety Shield SVG -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="M12 8c.5 1.5 2 2.5 2 4.5a3.5 3.5 0 0 1-7 0c0-1.5 1-2.5 1.5-3.5 1 2 2.5 2 3.5-1z" fill="currentColor"/>
+          </svg>
+        </div>
+        <div class="brand-info">
+          <h1>SMART FIRE SAFETY SCADA <span class="badge-tag">TẦNG 4 APPLICATION</span></h1>
+          <p class="subtitle">Đề tài 04: Hệ thống Báo khói Cảnh báo sớm • Nhóm 04 (N09) HUIT</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="header-center">
+      <!-- SYSTEM FSM STATUS CHIP -->
+      <div class="fsm-status-chip state-safe" id="fsmChip">
+        <span class="status-dot"></span>
+        <span class="status-label">Trạng thái FSM:</span>
+        <strong class="status-value" id="fsmStatusText">AN TOÀN (SAFE)</strong>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <!-- BROKER CONNECTION BADGE -->
+      <div class="connection-pill connected" id="brokerConnBadge" title="broker.emqx.io:8084 (WSS)">
+        <span class="pill-dot"></span>
+        <span id="connStatusText">MQTT Online</span>
+      </div>
+
+      <!-- ROLE SELECTOR (RBAC) -->
+      <div class="role-selector-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+        <select id="userRoleSelect" title="Phân quyền người dùng (Role-Based Access Control)">
+          <option value="admin">Quản trị viên (Admin)</option>
+          <option value="operator" selected>Kỹ thuật viên (Operator)</option>
+          <option value="viewer">Cư dân (Viewer)</option>
+        </select>
+      </div>
+
+      <!-- SIMULATION TOGGLE -->
+      <button id="btnToggleSimModal" class="btn-icon-label" title="Bảng điều khiển Giả lập">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="4" y1="21" x2="4" y2="14"/>
+          <line x1="4" y1="10" x2="4" y2="3"/>
+          <line x1="12" y1="21" x2="12" y2="12"/>
+          <line x1="12" y1="8" x2="12" y2="3"/>
+          <line x1="20" y1="21" x2="20" y2="16"/>
+          <line x1="20" y1="12" x2="20" y2="3"/>
+          <line x1="1" y1="14" x2="7" y2="14"/>
+          <line x1="9" y1="8" x2="15" y2="8"/>
+          <line x1="17" y1="16" x2="23" y2="16"/>
+        </svg>
+        Giả lập
+      </button>
+
+      <!-- CLOCK -->
+      <div class="clock-display" id="clockDisplay">12:00:00</div>
+    </div>
+  </header>
+
+  <!-- ALARM BANNER (Visible during Warning / Alarm / Cooldown) -->
+  <div class="alarm-banner" id="alarmBanner">
+    <div class="banner-inner">
+      <div class="banner-icon-wrap" id="bannerIcon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+      </div>
+      <div class="banner-text">
+        <strong id="bannerTitle">CẢNH BÁO: MÔI TRƯỜNG AN TOÀN</strong>
+        <span id="bannerDesc">Tất cả các thông số khí khói và nhiệt độ đang trong giới hạn cho phép.</span>
+      </div>
+      <div class="banner-actions">
+        <button id="btnBannerMute" class="btn btn-sm btn-outline-warning">Tắt còi 180s</button>
+        <button id="btnBannerAcknowledge" class="btn btn-sm btn-solid-warning">Xác nhận đã xử lý</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN CONTAINER -->
+  <main class="main-content">
+
+    <!-- KPI SUMMARY BAR -->
+    <section class="kpi-grid">
+      <!-- KPI 1: SMOKE -->
+      <div class="kpi-card glass-panel" id="kpiSmoke">
+        <div class="kpi-header">
+          <div class="kpi-title-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2c-4 4-6 7.5-6 11a6 6 0 0 0 12 0c0-3.5-2-7-6-11z"/>
+            </svg>
+            <span class="kpi-title">Nồng độ Khói MQ-2</span>
+          </div>
+          <span class="kpi-tag normal" id="tagSmoke">Bình thường</span>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-value-wrap">
+            <span class="kpi-num" id="valSmokePpm">145.2</span>
+            <span class="kpi-unit">PPM</span>
+          </div>
+          <div class="mini-progress-bar">
+            <div class="progress-fill" id="barSmoke" style="width: 25%;"></div>
+          </div>
+        </div>
+        <div class="kpi-footer">
+          <span>Ngưỡng Báo động: <strong id="kpiThreshold">400.0 PPM</strong></span>
+          <span class="kpi-trend" id="trendSmoke">0.0 PPM/s</span>
+        </div>
+      </div>
+
+      <!-- KPI 2: TEMPERATURE -->
+      <div class="kpi-card glass-panel" id="kpiTemp">
+        <div class="kpi-header">
+          <div class="kpi-title-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/>
+            </svg>
+            <span class="kpi-title">Nhiệt độ DHT22</span>
+          </div>
+          <span class="kpi-tag normal" id="tagTemp">Ổn định</span>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-value-wrap">
+            <span class="kpi-num" id="valTemp">28.4</span>
+            <span class="kpi-unit">°C</span>
+          </div>
+          <div class="mini-progress-bar">
+            <div class="progress-fill temp-fill" id="barTemp" style="width: 35%;"></div>
+          </div>
+        </div>
+        <div class="kpi-footer">
+          <span>Ngưỡng Quá nhiệt: <strong>55.0 °C</strong></span>
+          <span class="kpi-trend" id="trendTemp">+0.1 °C/m</span>
+        </div>
+      </div>
+
+      <!-- KPI 3: HUMIDITY -->
+      <div class="kpi-card glass-panel" id="kpiHum">
+        <div class="kpi-header">
+          <div class="kpi-title-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
+            </svg>
+            <span class="kpi-title">Độ ẩm Môi trường</span>
+          </div>
+          <span class="kpi-tag normal" id="tagHum">Lý tưởng</span>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-value-wrap">
+            <span class="kpi-num" id="valHum">62.8</span>
+            <span class="kpi-unit">%RH</span>
+          </div>
+          <div class="mini-progress-bar">
+            <div class="progress-fill hum-fill" id="barHum" style="width: 63%;"></div>
+          </div>
+        </div>
+        <div class="kpi-footer">
+          <span>Khuyến nghị: 40% – 70%</span>
+          <span>Khí áp: 1013 hPa</span>
+        </div>
+      </div>
+
+      <!-- KPI 4: FLEET / STATION STATUS -->
+      <div class="kpi-card glass-panel" id="kpiFleetStatus">
+        <div class="kpi-header">
+          <div class="kpi-title-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+              <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+              <line x1="6" y1="6" x2="6.01" y2="6"/>
+              <line x1="6" y1="18" x2="6.01" y2="18"/>
+            </svg>
+            <span class="kpi-title">Trạm Thu thập ESP32</span>
+          </div>
+          <span class="kpi-tag active" id="tagEspStatus">Hoạt động</span>
+        </div>
+        <div class="kpi-body">
+          <div class="kpi-fleet-stats">
+            <div class="stat-item">
+              <span class="stat-lbl">Thiết bị:</span>
+              <strong class="stat-val" id="valDeviceId">ESP32_SMOKE_N04_A01</strong>
+            </div>
+            <div class="stat-item">
+              <span class="stat-lbl">Vị trí:</span>
+              <strong class="stat-val">Tầng 3 - P302 (Lab IoT)</strong>
+            </div>
+            <div class="stat-item">
+              <span class="stat-lbl">Tín hiệu WiFi:</span>
+              <strong class="stat-val" id="valRssi">-52 dBm (Tốt)</strong>
+            </div>
+          </div>
+        </div>
+        <div class="kpi-footer">
+          <span>Keep-Alive: <strong id="valKeepAlive">Vừa xong</strong></span>
+          <span>Độ trễ mạng: <strong id="valLatency">42 ms</strong></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- MAIN TWO-COLUMN DASHBOARD -->
+    <div class="dashboard-grid">
+
+      <!-- LEFT COLUMN: REAL-TIME GAUGES & CHARTS -->
+      <div class="dash-column-left">
+
+        <!-- TELEMETRY CHART PANEL -->
+        <div class="glass-panel chart-panel">
+          <div class="panel-header">
+            <div class="header-title-group">
+              <div class="title-with-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                </svg>
+                <h3>Biểu đồ Xu hướng Khói & Nhiệt độ Thời gian thực</h3>
+              </div>
+              <p>Chu kỳ lấy mẫu 2.0s qua kênh <code>Nhom09/smoke/telemetry</code></p>
+            </div>
+            <div class="panel-controls">
+              <button class="btn-chip active" id="btnChartRange10m">10 Phút</button>
+              <button class="btn-chip" id="btnChartRange30m">30 Phút</button>
+              <button class="btn-chip" id="btnResetChart">Làm mới</button>
+            </div>
+          </div>
+          <div class="chart-container">
+            <canvas id="telemetryChart"></canvas>
+          </div>
+          <div class="chart-legend-custom">
+            <div class="leg-item"><span class="leg-dot color-smoke"></span> Khói MQ-2 (PPM)</div>
+            <div class="leg-item"><span class="leg-dot color-temp"></span> Nhiệt độ DHT22 (°C)</div>
+            <div class="leg-item"><span class="leg-line color-thresh"></span> Ngưỡng Báo động (400 PPM)</div>
+          </div>
+        </div>
+
+        <!-- FLOORPLAN / FLEET LOCATION MAP (CAD ARCHITECTURAL BLUEPRINT) -->
+        <div class="glass-panel floorplan-panel">
+          <div class="panel-header">
+            <div class="header-title-group">
+              <div class="title-with-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                  <line x1="3" y1="9" x2="21" y2="9"/>
+                  <line x1="9" y1="21" x2="9" y2="9"/>
+                </svg>
+                <h3>Sơ đồ Phân vùng Cảm biến Tầng 3 (HUIT Tòa A)</h3>
+              </div>
+              <p>Mặt bằng kiến trúc giám sát liên vùng (Cross-Zone Monitoring)</p>
+            </div>
+            <span class="badge-status-zone" id="zoneOverallStatus"><span class="dot"></span> Toàn sàn Bình thường</span>
+          </div>
+
+          <div class="floorplan-map-wrap">
+            <!-- ZONE P301 -->
+            <div class="floor-zone zone-p301">
+              <div class="zone-label">Phòng P301<br><small>Văn phòng Khoa</small></div>
+              <div class="sensor-node node-normal" title="Trạm Node A00: An toàn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4.93 19.07A10 10 0 0 1 19.07 4.93M7.76 16.24A6 6 0 0 1 16.24 7.76M12 12h.01"/>
+                </svg>
+                <span class="node-name">Node A00</span>
+              </div>
+            </div>
+
+            <!-- ZONE P302 (ACTIVE TARGET) -->
+            <div class="floor-zone zone-p302 active-focus" id="zoneP302">
+              <div class="zone-label">Phòng P302<br><strong>PHÒNG LAB IOT (TRẠM CHÍNH)</strong></div>
+              <div class="sensor-node node-live" id="mapNodeA01" title="Trạm chính N04_A01: Đang giám sát">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2c-4 4-6 7.5-6 11a6 6 0 0 0 12 0c0-3.5-2-7-6-11z"/>
+                </svg>
+                <span class="node-name">ESP32_A01</span>
+                <span class="node-badge" id="mapNodeBadge">SAFE</span>
+              </div>
+              <div class="actuator-marker fan-marker" id="mapFanMarker" title="Quạt hút thông gió P302">
+                <span class="fan-icon-spin" id="mapFanIcon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M12 9V2a3 3 0 0 1 3 3v4"/>
+                    <path d="M15 12h7a3 3 0 0 1-3 3h-4"/>
+                    <path d="M12 15v7a3 3 0 0 1-3-3v-4"/>
+                    <path d="M9 12H2a3 3 0 0 1 3-3h4"/>
+                  </svg>
+                </span>
+                Quạt P302
+              </div>
+            </div>
+
+            <!-- ZONE P303 -->
+            <div class="floor-zone zone-p303" id="zoneP303">
+              <div class="zone-label">Phòng P303<br><small>Kho Thiết bị</small></div>
+              <div class="sensor-node node-normal" id="mapNodeA02" title="Trạm phụ A02">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4.93 19.07A10 10 0 0 1 19.07 4.93M7.76 16.24A6 6 0 0 1 16.24 7.76M12 12h.01"/>
+                </svg>
+                <span class="node-name">Node A02</span>
+              </div>
+            </div>
+
+            <!-- CORRIDOR ESCAPE ROUTE -->
+            <div class="floor-zone zone-corridor">
+              <div class="zone-label">HÀNH LANG TẦNG 3 - LỐI THOÁT HIỂM</div>
+              <div class="actuator-marker siren-marker" id="mapSirenMarker">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                </svg>
+                Còi Liên vùng Zone F03
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT COLUMN: ACTUATORS CONTROL, RULES, TELEGRAM, AUDIT LOG -->
+      <div class="dash-column-right">
+
+        <!-- REMOTE ACTUATOR CONTROL CONSOLE -->
+        <div class="glass-panel control-panel">
+          <div class="panel-header">
+            <div class="header-title-group">
+              <div class="title-with-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                  <line x1="8" y1="21" x2="16" y2="21"/>
+                  <line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+                <h3>Trung tâm Điều khiển Thiết bị Chấp hành</h3>
+              </div>
+              <p>Lệnh Downlink thời gian thực qua MQTT QoS 1</p>
+            </div>
+            <span class="role-badge-tag" id="currentRoleBadge">Quyền: Kỹ thuật viên</span>
+          </div>
+
+          <div class="control-cards-grid">
+
+            <!-- ACTUATOR 1: EXHAUST FAN -->
+            <div class="actuator-box" id="boxFan">
+              <div class="actuator-box-header">
+                <div class="actuator-title-icon">
+                  <div class="act-icon-box" id="fanStatusIcon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="3"/>
+                      <path d="M12 9V2a3 3 0 0 1 3 3v4"/>
+                      <path d="M15 12h7a3 3 0 0 1-3 3h-4"/>
+                      <path d="M12 15v7a3 3 0 0 1-3-3v-4"/>
+                      <path d="M9 12H2a3 3 0 0 1 3-3h4"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <strong>Quạt hút Khói DC 12V</strong>
+                    <span class="act-sub" id="fanTopicSub">Nhom09/smoke/cmd/fan</span>
+                  </div>
+                </div>
+                <span class="act-state-badge off" id="badgeFanState">ĐANG TẮT</span>
+              </div>
+
+              <div class="actuator-box-body">
+                <p class="act-mode-desc">Chế độ vận hành: <strong id="lblFanMode">TỰ ĐỘNG (AUTO)</strong></p>
+                <div class="btn-group-controls">
+                  <button class="btn btn-outline-success" id="btnFanOn" title="Bật quạt cưỡng bức">
+                    Bật Quạt
+                  </button>
+                  <button class="btn btn-outline-danger" id="btnFanOff" title="Tắt quạt (bị khóa nếu đang ALARM)">
+                    Tắt Quạt
+                  </button>
+                  <button class="btn btn-outline-info active" id="btnFanAuto" title="Chuyển chế độ Tự động theo FSM">
+                    Auto FSM
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- ACTUATOR 2: BUZZER ALARM SIREN -->
+            <div class="actuator-box" id="boxBuzzer">
+              <div class="actuator-box-header">
+                <div class="actuator-title-icon">
+                  <div class="act-icon-box" id="buzzerStatusIcon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <strong>Còi hú Báo động Khẩn cấp</strong>
+                    <span class="act-sub">Nhom09/smoke/cmd/buzzer</span>
+                  </div>
+                </div>
+                <span class="act-state-badge off" id="badgeBuzzerState">IM LẶNG</span>
+              </div>
+
+              <div class="actuator-box-body">
+                <p class="act-mode-desc" id="lblBuzzerDesc">Còi sẵn sàng tự động phản ứng khi khói >= 400 PPM</p>
+                <div class="btn-group-controls">
+                  <button class="btn btn-outline-warning" id="btnBuzzerMute" title="Tạm tắt tiếng còi 180s để xử lý hiện trường">
+                    Tắt tiếng (180s)
+                  </button>
+                  <button class="btn btn-outline-primary" id="btnBuzzerUnmute" title="Kích hoạt lại âm thanh còi">
+                    Hủy Mute
+                  </button>
+                  <button class="btn btn-outline-secondary" id="btnBuzzerTest" title="Phát 1 tiếng bíp 0.5s kiểm tra còi">
+                    Test Beep
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- ACTUATOR 3: SENSITIVITY SCHEDULER -->
+            <div class="actuator-box" id="boxScheduler">
+              <div class="actuator-box-header">
+                <div class="actuator-title-icon">
+                  <div class="act-icon-box" id="schedIcon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="5"/>
+                      <line x1="12" y1="1" x2="12" y2="3"/>
+                      <line x1="12" y1="21" x2="12" y2="23"/>
+                      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                      <line x1="1" y1="12" x2="3" y2="12"/>
+                      <line x1="21" y1="12" x2="23" y2="12"/>
+                      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <strong>Lịch trình Ngưỡng Báo động</strong>
+                    <span class="act-sub">Rule 3 Adaptive Scheduler</span>
+                  </div>
+                </div>
+                <span class="act-state-badge mode-day" id="badgeNightState">CHẾ ĐỘ NGÀY</span>
+              </div>
+
+              <div class="actuator-box-body">
+                <p class="act-mode-desc">Ngưỡng kích hoạt: <strong id="lblThresholdDesc">400 PPM (Ban ngày)</strong></p>
+                <div class="scheduler-toggle-wrap">
+                  <button class="btn btn-sm btn-outline-warning active" id="btnModeDay">Ban ngày (400 PPM)</button>
+                  <button class="btn btn-sm btn-outline-primary" id="btnModeNight">Ban đêm (350 PPM)</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- TUẦN 7: BUSINESS RULES & ABNORMAL SCENARIOS MANAGEMENT CONSOLE -->
+        <div class="glass-panel week7-panel" id="panelWeek7Rules">
+          <div class="panel-header">
+            <div class="header-title-group">
+              <div class="title-with-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/>
+                  <polyline points="10 9 9 9 8 9"/>
+                </svg>
+                <h3>Quản trị Quy tắc Tự động & Sự cố (Tuần 7)</h3>
+              </div>
+              <p>5 Business Automation Rules & Bộ Chẩn đoán Sức khỏe Phần cứng</p>
+            </div>
+            <span class="badge-tag week7-tag">Milestone Tuần 7</span>
+          </div>
+
+          <!-- 5 BUSINESS RULES MATRIX -->
+          <div class="week7-rules-list">
+            <div class="rule-item active">
+              <div class="rule-info">
+                <span class="rule-code">RULE 1</span>
+                <div>
+                  <strong>Đa cảm biến tương quan (Multi-Sensor Rate-of-Rise)</strong>
+                  <p class="rule-desc">Khói ≥ 400 PPM + Gia tốc nhiệt dT/dt ≥ 3°C/phút → Khẳng định cháy thật (Real Fire), kích hoạt Full Alarm bỏ qua trễ lọc.</p>
+                </div>
+              </div>
+              <span class="rule-status-badge active">ACTIVE</span>
+            </div>
+
+            <div class="rule-item active">
+              <div class="rule-info">
+                <span class="rule-code">RULE 2</span>
+                <div>
+                  <strong>Chống Báo động giả & Lọc khói thoáng qua (&lt; 10s)</strong>
+                  <p class="rule-desc">Khói ≥ 400 PPM nhưng nhiệt độ &lt; 35°C và t &lt; 10s (khói thuốc/nấu ăn) → Chỉ bật quạt thông gió, ngắt còi hú tránh hoảng loạn.</p>
+                </div>
+              </div>
+              <span class="rule-status-badge active">ACTIVE</span>
+            </div>
+
+            <div class="rule-item active">
+              <div class="rule-info">
+                <span class="rule-code">RULE 3</span>
+                <div>
+                  <strong>Ngưỡng nhạy Thích ứng Ngày/Đêm (Adaptive Day/Night)</strong>
+                  <p class="rule-desc">Ngày: 400/300 PPM. Đêm (22h-06h): Tự động hạ ngưỡng 350/250 PPM để bảo vệ tối đa tính mạng khi người dân đang ngủ.</p>
+                </div>
+              </div>
+              <span class="rule-status-badge active">ACTIVE</span>
+            </div>
+
+            <div class="rule-item active">
+              <div class="rule-info">
+                <span class="rule-code">RULE 4</span>
+                <div>
+                  <strong>Thông gió Cưỡng bức & Trễ Phục hồi 30s (Post-Purge Cooldown)</strong>
+                  <p class="rule-desc">Sau khi khói hạ về an toàn (≤ 300 PPM), quạt duy trì chạy thêm 30 giây để hút sạch khí độc tích tụ trước khi về IDLE.</p>
+                </div>
+              </div>
+              <span class="rule-status-badge active">ACTIVE</span>
+            </div>
+
+            <div class="rule-item active">
+              <div class="rule-info">
+                <span class="rule-code">RULE 5</span>
+                <div>
+                  <strong>Cảnh báo Thoát hiểm Liên vùng (Cross-Zone Broadcast)</strong>
+                  <p class="rule-desc">Khi khói tại P302 ≥ 600 PPM liên tục quá 15s → Tự động phát lệnh Broadcast hú còi toàn bộ Hành lang Tầng 3 (Zone F03).</p>
+                </div>
+              </div>
+              <span class="rule-status-badge active">ACTIVE</span>
+            </div>
+          </div>
+
+          <!-- DIAGNOSTIC HEALTH MATRIX -->
+          <div class="health-matrix-wrap">
+            <div class="matrix-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+              </svg>
+              Chẩn đoán Sức khỏe Phần cứng (Diagnostics)
+            </div>
+            <div class="health-grid">
+              <div class="health-card">
+                <span class="health-label">Cảm biến Khói MQ-2</span>
+                <strong id="healthMq2Status" class="health-val ok">● ADC BÌNH THƯỜNG</strong>
+              </div>
+              <div class="health-card">
+                <span class="health-label">Cảm biến DHT22</span>
+                <strong id="healthDhtStatus" class="health-val ok">● 1-WIRE KẾT NỐI</strong>
+              </div>
+              <div class="health-card">
+                <span class="health-label">Watchdog Heartbeat</span>
+                <strong id="healthWatchdogStatus" class="health-val ok">● PING 10s (ALIVE)</strong>
+              </div>
+              <div class="health-card">
+                <span class="health-label">Rơ-le Quạt Chấp hành</span>
+                <strong id="healthActuatorStatus" class="health-val ok">● PHẢN HỒI ACK</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- FAULT INJECTION SANDBOX -->
+          <div class="fault-sandbox-wrap">
+            <div class="matrix-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+              </svg>
+              Bộ Giả lập Sự cố Bất thường (Fault Injection)
+            </div>
+            <p class="sandbox-desc">Kích hoạt kịch bản để kiểm tra cơ chế Fail-Safe tự động của trạm ESP32:</p>
+            <div class="sandbox-buttons-grid">
+              <button class="btn btn-sm btn-outline-danger" id="btnFaultMq2">Đứt dây MQ-2</button>
+              <button class="btn btn-sm btn-outline-danger" id="btnFaultDht">Lỗi DHT22 (NaN)</button>
+              <button class="btn btn-sm btn-outline-warning" id="btnFaultActuator">Kẹt Rơ-le Quạt</button>
+              <button class="btn btn-sm btn-outline-info" id="btnSyncBuffer">Đồng bộ Buffer 20</button>
+              <button class="btn btn-sm btn-solid-success" id="btnClearAllFaults">Xóa lỗi (Khôi phục)</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- TELEGRAM BOT ALERTING INTEGRATION -->
+        <div class="glass-panel telegram-panel">
+          <div class="panel-header">
+            <div class="header-title-group">
+              <div class="title-with-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="22" y1="2" x2="11" y2="13"/>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                </svg>
+                <h3>Kênh Thông báo Khẩn cấp Telegram Bot</h3>
+              </div>
+              <p>Tự động phát thông báo thời gian thực tới đội phản ứng nhanh</p>
+            </div>
+            <span class="badge-telegram-ready">Bot Online</span>
+          </div>
+
+          <div class="telegram-body">
+            <!-- Simulated Telegram Phone View -->
+            <div class="telegram-chat-window">
+              <div class="tg-chat-header">
+                <div class="tg-bot-avatar">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="11" width="18" height="10" rx="2"/>
+                    <circle cx="12" cy="5" r="2"/>
+                    <path d="M12 7v4"/>
+                    <line x1="8" y1="16" x2="8" y2="16"/>
+                    <line x1="16" y1="16" x2="16" y2="16"/>
+                  </svg>
+                </div>
+                <div class="tg-bot-meta">
+                  <strong>@HUIT_FireAlert_N04_Bot</strong>
+                  <span>Hệ thống Giám sát & Báo cháy Tự động 24/7</span>
+                </div>
+              </div>
+              <div class="tg-messages-list" id="tgMessagesList">
+                <div class="tg-msg tg-bot-msg">
+                  <div class="tg-msg-time">Hệ thống khởi động</div>
+                  <div class="tg-msg-bubble">
+                    <strong>HỆ THỐNG BÁO KHÓI HOẠT ĐỘNG</strong><br>
+                    Trạm: <code>ESP32_SMOKE_N04_A01</code><br>
+                    Vị trí: Phòng P302 - Tầng 3 HUIT<br>
+                    Trạng thái: SAFE (An toàn)<br>
+                    Khói: 145 PPM | Nhiệt độ: 28.4°C
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="telegram-actions">
+              <button class="btn btn-sm btn-solid-primary" id="btnTestTgAlert">
+                Bắn Cảnh báo Khẩn cấp thử nghiệm
+              </button>
+              <button class="btn btn-sm btn-outline-secondary" id="btnClearTgHistory">
+                Xóa tin nhắn
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- AUDIT TRAIL / EVENT LOG PANEL -->
+        <div class="glass-panel audit-panel">
+          <div class="panel-header">
+            <div class="header-title-group">
+              <div class="title-with-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/>
+                  <polyline points="10 9 9 9 8 9"/>
+                </svg>
+                <h3>Nhật ký Sự kiện & Kiểm toán An toàn (Audit Trail)</h3>
+              </div>
+              <p>Lưu trữ bộ đệm vòng & đồng bộ <code>logs/event_history.log</code></p>
+            </div>
+            <div class="audit-filters">
+              <select id="logFilterLevel" class="select-sm">
+                <option value="ALL">Tất cả cấp độ</option>
+                <option value="CRITICAL">CRITICAL</option>
+                <option value="WARN">WARN</option>
+                <option value="INFO">INFO</option>
+              </select>
+              <button class="btn-sm btn-outline-secondary" id="btnExportLogs" title="Tải xuống tệp CSV">
+                Xuất CSV
+              </button>
+            </div>
+          </div>
+
+          <div class="audit-table-wrap">
+            <table class="audit-table" id="auditTable">
+              <thead>
+                <tr>
+                  <th style="width: 75px;">Thời gian</th>
+                  <th style="width: 70px;">Mức độ</th>
+                  <th style="width: 130px;">Mã Sự kiện</th>
+                  <th>Mô tả chi tiết</th>
+                  <th style="width: 65px;">FSM</th>
+                </tr>
+              </thead>
+              <tbody id="auditTableBody">
+                <!-- Dynamically populated via app.js -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <!-- MODAL: INTERACTIVE SIMULATOR (Dành cho việc chấm điểm / Demo kiểm thử) -->
+  <div class="modal-overlay" id="simModal">
+    <div class="modal-content glass-panel">
+      <div class="modal-header">
+        <div class="modal-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="4" y1="21" x2="4" y2="14"/>
+            <line x1="4" y1="10" x2="4" y2="3"/>
+            <line x1="12" y1="21" x2="12" y2="12"/>
+            <line x1="12" y1="8" x2="12" y2="3"/>
+            <line x1="20" y1="21" x2="20" y2="16"/>
+            <line x1="20" y1="12" x2="20" y2="3"/>
+            <line x1="1" y1="14" x2="7" y2="14"/>
+            <line x1="9" y1="8" x2="15" y2="8"/>
+            <line x1="17" y1="16" x2="23" y2="16"/>
+          </svg>
+          <div>
+            <h3>BẢNG ĐIỀU KHIỂN GIẢ LẬP ĐẦU VÀO CẢM BIẾN (TEST BENCH)</h3>
+            <p>Hội đồng Giảng viên chủ động thay đổi thông số kiểm chứng phản ứng Tầng 4</p>
+          </div>
+        </div>
+        <button class="btn-close-modal" id="btnCloseSimModal">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="sim-row">
+          <label>Nồng độ Khói MQ-2 (PPM): <strong id="simLblSmoke">145 PPM</strong></label>
+          <div class="slider-wrap">
+            <input type="range" id="simSliderSmoke" min="50" max="950" value="145" step="5">
+          </div>
+          <div class="preset-buttons">
+            <button class="btn btn-xs btn-outline-success" onclick="setSimPreset(120, 27)">An toàn (120 PPM)</button>
+            <button class="btn btn-xs btn-outline-warning" onclick="setSimPreset(320, 32)">Cảnh giác (320 PPM)</button>
+            <button class="btn btn-xs btn-outline-danger" onclick="setSimPreset(550, 48)">Báo động Khẩn (550 PPM)</button>
+            <button class="btn btn-xs btn-outline-primary" onclick="setSimPreset(270, 29)">Hạ khói Cooldown (270 PPM)</button>
+          </div>
+        </div>
+
+        <div class="sim-row">
+          <label>Nhiệt độ DHT22 (°C): <strong id="simLblTemp">28.4 °C</strong></label>
+          <div class="slider-wrap">
+            <input type="range" id="simSliderTemp" min="15" max="75" value="28.4" step="0.5">
+          </div>
+        </div>
+
+        <div class="sim-row">
+          <label>Mô phỏng Mất kết nối Trạm (Watchdog Timeout / LWT):</label>
+          <div class="toggle-wrap">
+            <button class="btn btn-sm btn-outline-danger" id="btnSimDisconnect">Mô phỏng Đứt mạng ESP32</button>
+            <button class="btn btn-sm btn-outline-success" id="btnSimReconnect">Khôi phục Kết nối</button>
+          </div>
+        </div>
+
+        <div class="sim-row">
+          <label>Nguồn Dữ liệu Hoạt động:</label>
+          <div class="source-select-wrap">
+            <label><input type="radio" name="dataSource" value="sim" checked> Trình Giả lập Trực tiếp (Local Fast Sim)</label>
+            <label><input type="radio" name="dataSource" value="mqtt"> MQTT WebSocket Thật (broker.emqx.io:8084)</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-solid-primary" id="btnApplySim">Đóng Bảng Giả lập</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION CONTAINER -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- APPLICATION LOGIC -->
+  <script src="app.js?v=light_academic_v2"></script>
+</body>
+</html>

@@ -1,0 +1,137 @@
+# ==============================================================================
+# .gitignore - Dự Án IoT: Hệ Thống Báo Khói Cảnh Báo Sớm (ESP32 - MQTT - Web)
+# ==============================================================================
+# File cấu hình phân loại:
+# - CÁC FILE ĐƯỢC ĐẨY LÊN GITHUB: Mã nguồn C++ (src/), cấu hình Wokwi, Web Dashboard,
+#   kịch bản Node-RED, test suites, Python build scripts, tài liệu báo cáo đồ án (docs/).
+# - CÁC FILE BỊ CHẶN (Chỉ lưu và xem local, không đẩy lên GitHub): Build binaries, 
+#   cache tạm thời, file log chạy thực tế, file khóa Office, cấu hình IDE cá nhân.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. PLATFORMIO & NHỊ PHÂN BIÊN DỊCH PHẦN CỨNG (EMBEDDED BUILD ARTIFACTS)
+# Thư mục build chứa mã máy biên dịch, elf, bin và thư viện tải tự động (~38MB+)
+# ------------------------------------------------------------------------------
+.pio/
+.pioenvs/
+.piolibdeps/
+*.elf
+*.bin
+*.hex
+*.map
+*.o
+*.a
+*.sconsign*
+
+# ------------------------------------------------------------------------------
+# 2. PYTHON BYTECACHE & MÔI TRƯỜNG ẢO (PYTHON CACHE & ENVIRONMENTS)
+# ------------------------------------------------------------------------------
+__pycache__/
+docs/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Testing & Coverage cache
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# ------------------------------------------------------------------------------
+# 3. NHẬT KÝ KIỂM THỬ & RUNTIME TRACES (LOG FILES)
+# Bỏ qua các file log ghi lại sự kiện thử nghiệm thực tế (sinh liên tục làm bẩn git)
+# Giữ lại thư mục logs/ rỗng bằng file .gitkeep
+# ------------------------------------------------------------------------------
+logs/*.log
+*.log
+!logs/.gitkeep
+
+# ------------------------------------------------------------------------------
+# 4. FILE KHÓA TẠM THỜI CỦA MICROSOFT OFFICE (OFFICE LOCK & TEMP FILES)
+# Tự động sinh ra khi đang mở Word/PowerPoint/Excel để soạn thảo báo cáo
+# ------------------------------------------------------------------------------
+~$*.docx
+~$*.pptx
+~$*.xlsx
+~$*.doc
+~$*.ppt
+~$*.xls
+*.tmp
+*.bak
+
+# ------------------------------------------------------------------------------
+# 5. NODE.JS & WEB DEPENDENCIES (DỰ PHÒNG NẾU DÙNG NPM)
+# ------------------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ------------------------------------------------------------------------------
+# 6. FILE RÁC HỆ ĐIỀU HÀNH & EDITOR CÁ NHÂN (OS & IDE ARTIFACTS)
+# ------------------------------------------------------------------------------
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# VS Code (Giữ lại cấu hình mở rộng gợi ý nếu có, bỏ qua cache máy)
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.sublime-project
+*.sublime-workspace
+.idea/
+
+# ------------------------------------------------------------------------------
+# 7. BẢO MẬT & SECRETS (CHỐNG LỌT MẬT KHẨU / CREDENTIALS)
+# ------------------------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.crt
+secrets.h
+credentials.h
+
+# ------------------------------------------------------------------------------
+# 8. TÀI LIỆU NỘI BỘ (INTERNAL DOCUMENTATION - LOCAL ONLY)
+# Thư mục chứa báo cáo tiến độ tuần, slide PowerPoint, Word, PDF bảo vệ đồ án
+# ------------------------------------------------------------------------------
+docs/
+

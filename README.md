@@ -153,13 +153,10 @@ E:\IoT\DoAn\
 │   └── flows_smoke_detector.json # Flow cấu hình xử lý cảnh báo và giao diện Node-RED
 │
 ├── tests/                        # Bộ kiểm thử bổ trợ
-│   ├── test_harness.py           # Khung kiểm thử tự động hóa
 │   └── mqttx_collection_slide65.json # Bộ kịch bản mẫu test bằng MQTTX
 │
-├── logs/                         # Thư mục lưu log thử nghiệm (đã ignore nội dung log)
-│   └── .gitkeep                  # Giữ thư mục trên repository
-│
-└── *.py                          # Các kịch bản tự động hóa kiểm thử và điều phối
+└── logs/                         # Thư mục lưu log thử nghiệm (đã ignore nội dung log)
+    └── .gitkeep                  # Giữ thư mục trên repository
 ```
 
 ---

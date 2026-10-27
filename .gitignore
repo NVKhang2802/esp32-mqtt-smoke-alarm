@@ -26,6 +26,11 @@
 # ------------------------------------------------------------------------------
 # 2. PYTHON BYTECACHE & MÔI TRƯỜNG ẢO (PYTHON CACHE & ENVIRONMENTS)
 # ------------------------------------------------------------------------------
+# Chặn toàn bộ script Python và PowerShell (chỉ chạy local, không đẩy lên GitHub)
+*.py
+tests/*.py
+*.ps1
+
 __pycache__/
 docs/__pycache__/
 *.py[cod]

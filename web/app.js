@@ -102,15 +102,17 @@ let webAudioCtx = null;
 // 3. INITIALIZATION & LIFECYCLE
 // =============================================================================
 document.addEventListener("DOMContentLoaded", () => {
-  initClock();
-  initChart();
-  initMqttClient();
-  initEventHandlers();
-  initFaultInjectionHandlers();
-  initSimulatorDefaults();
+  try { initClock(); } catch (e) { console.error("initClock error:", e); }
+  try { initChart(); } catch (e) { console.error("initChart error:", e); }
+  try { initMqttClient(); } catch (e) { console.error("initMqttClient error:", e); }
+  try { initEventHandlers(); } catch (e) { console.error("initEventHandlers error:", e); }
+  try { initFaultInjectionHandlers(); } catch (e) { console.error("initFaultInjectionHandlers error:", e); }
+  try { initSimulatorDefaults(); } catch (e) { console.error("initSimulatorDefaults error:", e); }
 
-  addAuditLog("SYSTEM", "APPLICATION_STARTED", "Khởi động giao diện Tầng 4 Application thành công.", "SAFE");
-  updateUiFromState();
+  try {
+    addAuditLog("SYSTEM", "APPLICATION_STARTED", "Khởi động giao diện Tầng 4 Application thành công.", "SAFE");
+    updateUiFromState();
+  } catch (e) { console.error("updateUiFromState error:", e); }
 
   // Watchdog heartbeat checker
   setInterval(heartbeatCheck, 2000);
@@ -135,56 +137,101 @@ function sendDownlinkCommand(topicKey, payload) {
 // =============================================================================
 // 5. MQTT WEBSOCKET CLIENT INTEGRATION
 // =============================================================================
+let attemptedBackup = false;
+let mqttConnectTimer = null;
+
 function initMqttClient() {
+  if (typeof mqtt === "undefined") {
+    console.warn("[MQTT.js] Library not loaded. Running in local simulation mode.");
+    if (DOM.connStatusText) DOM.connStatusText.textContent = "Chế độ Mô phỏng (Không có Lib)";
+    return;
+  }
+
   const clientId = "WebClient_Smoke_N04_" + Math.random().toString(16).substring(2, 8);
   const connBadge = DOM.brokerConnBadge;
   const connText  = DOM.connStatusText;
 
-  if (connText) connText.textContent = "Đang kết nối...";
+  function connectToBroker(url) {
+    if (connText) connText.textContent = `Đang kết nối (${url.startsWith("wss") ? "WSS :8084" : "WS :8083"})...`;
 
-  try {
-    mqttClient = mqtt.connect(CONFIG.brokerWss, {
-      clientId: clientId,
-      clean: true,
-      connectTimeout: 5000,
-      reconnectPeriod: 4000
-    });
+    try {
+      if (mqttClient) {
+        try { mqttClient.end(true); } catch(err) {}
+      }
 
-    mqttClient.on("connect", () => {
-      STATE.isConnected = true;
-      if (connBadge) connBadge.className = "connection-pill connected";
-      if (connText) connText.textContent = "EMQX Online";
-      showToast("Đã kết nối máy chủ MQTT EMQX (WSS)", "success");
+      mqttClient = mqtt.connect(url, {
+        clientId: clientId,
+        clean: true,
+        connectTimeout: 4000,
+        reconnectPeriod: 5000
+      });
 
-      mqttClient.subscribe(CONFIG.topics.telemetry, { qos: 0 });
-      mqttClient.subscribe(CONFIG.topics.eventAlarm, { qos: 1 });
-      mqttClient.subscribe(CONFIG.topics.statusAck, { qos: 1 });
-      mqttClient.subscribe(CONFIG.topics.lwt, { qos: 1 });
+      if (mqttConnectTimer) clearTimeout(mqttConnectTimer);
+      if (url === CONFIG.brokerWss && !attemptedBackup) {
+        mqttConnectTimer = setTimeout(() => {
+          if (!STATE.isConnected && !attemptedBackup) {
+            console.warn("[MQTT] WSS :8084 timeout. Switching to WS backup :8083...");
+            attemptedBackup = true;
+            connectToBroker(CONFIG.brokerWsBackup);
+          }
+        }, 3500);
+      }
 
-      addAuditLog("INFO", "MQTT_CONNECTED", `Kết nối WebSocket tới ${CONFIG.brokerWss} thành công.`, STATE.fsmState);
-    });
+      mqttClient.on("connect", () => {
+        if (mqttConnectTimer) clearTimeout(mqttConnectTimer);
+        STATE.isConnected = true;
+        if (connBadge) connBadge.className = "connection-pill connected";
+        if (connText) connText.textContent = `EMQX Online (${url.startsWith("wss") ? "WSS" : "WS"})`;
+        showToast(`Đã kết nối máy chủ MQTT EMQX (${url.startsWith("wss") ? "WSS" : "WS"})`, "success");
 
-    mqttClient.on("message", (topic, message) => {
-      handleIncomingMqtt(topic, message.toString());
-    });
+        mqttClient.subscribe(CONFIG.topics.telemetry, { qos: 0 });
+        mqttClient.subscribe(CONFIG.topics.eventAlarm, { qos: 1 });
+        mqttClient.subscribe(CONFIG.topics.statusAck, { qos: 1 });
+        mqttClient.subscribe(CONFIG.topics.lwt, { qos: 1 });
+        if (CONFIG.topics.historySync) mqttClient.subscribe(CONFIG.topics.historySync, { qos: 1 });
 
-    mqttClient.on("error", (err) => {
-      console.warn("MQTT WSS Error, falling back to simulator:", err);
-      STATE.isConnected = false;
-      if (connBadge) connBadge.className = "connection-pill disconnected";
-      if (connText) connText.textContent = "Chế độ Mô phỏng";
-    });
+        addAuditLog("INFO", "MQTT_CONNECTED", `Kết nối WebSocket tới ${url} thành công.`, STATE.fsmState);
+      });
 
-    mqttClient.on("close", () => {
-      STATE.isConnected = false;
-      if (connBadge) connBadge.className = "connection-pill disconnected";
-      if (connText) connText.textContent = "Mất kết nối";
-    });
-  } catch (e) {
-    console.warn("MQTT Connect exception, operating in demo simulation:", e);
-    if (connBadge) connBadge.className = "connection-pill disconnected";
-    if (connText) connText.textContent = "Sim Mode";
+      mqttClient.on("message", (topic, message) => {
+        handleIncomingMqtt(topic, message.toString());
+      });
+
+      mqttClient.on("error", (err) => {
+        console.warn(`MQTT connection error on ${url}:`, err);
+        if (!STATE.isConnected && !attemptedBackup && url === CONFIG.brokerWss) {
+          attemptedBackup = true;
+          console.log("[MQTT] Failing over to WS backup :8083...");
+          connectToBroker(CONFIG.brokerWsBackup);
+        } else if (!STATE.isConnected) {
+          if (connBadge) connBadge.className = "connection-pill disconnected";
+          if (connText) connText.textContent = "Chế độ Mô phỏng";
+        }
+      });
+
+      mqttClient.on("close", () => {
+        if (!attemptedBackup && url === CONFIG.brokerWss && !STATE.isConnected) {
+          attemptedBackup = true;
+          connectToBroker(CONFIG.brokerWsBackup);
+        } else if (STATE.isConnected) {
+          STATE.isConnected = false;
+          if (connBadge) connBadge.className = "connection-pill disconnected";
+          if (connText) connText.textContent = "Mất kết nối";
+        }
+      });
+    } catch (e) {
+      console.warn("MQTT Connect exception:", e);
+      if (!attemptedBackup && url === CONFIG.brokerWss) {
+        attemptedBackup = true;
+        connectToBroker(CONFIG.brokerWsBackup);
+      } else {
+        if (connBadge) connBadge.className = "connection-pill disconnected";
+        if (connText) connText.textContent = "Sim Mode";
+      }
+    }
   }
+
+  connectToBroker(CONFIG.brokerWss);
 }
 
 function handleIncomingMqtt(topic, payloadStr) {
@@ -583,6 +630,11 @@ function updateUiFromState() {
 function initChart() {
   const chartCanvas = DOM.telemetryChart;
   if (!chartCanvas) return;
+
+  if (typeof Chart === "undefined") {
+    console.warn("[Chart.js] Thư viện Chart.js chưa tải được, bỏ qua khởi tạo biểu đồ động.");
+    return;
+  }
 
   const ctx = chartCanvas.getContext("2d");
   const now = new Date();

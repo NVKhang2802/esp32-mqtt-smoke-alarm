@@ -9,10 +9,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <!-- MQTT.js for Browser WebSocket Client -->
-  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-  <!-- Chart.js for Live Telemetry Graphs -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- MQTT.js: Local Offline First with CDN Fallback -->
+  <script src="libs/mqtt.min.js"></script>
+  <script>window.mqtt || document.write('<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"><\/script>')</script>
+  <!-- Chart.js: Local Offline First with CDN Fallback -->
+  <script src="libs/chart.umd.min.js"></script>
+  <script>window.Chart || document.write('<script src="https://cdn.jsdelivr.net/npm/chart.js"><\/script>')</script>
   <link rel="stylesheet" href="style.css?v=light_academic_v2">
 </head>
 <body>

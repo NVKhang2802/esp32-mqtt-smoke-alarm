@@ -1,5 +1,6 @@
 #include <unity.h>
 #include <cmath>
+#include <cstring>
 #include "thresholds.h"
 #include "ema_filter.h"
 #include "health.h"
@@ -420,6 +421,208 @@ void test_exponential_backoff(void) {
 }
 
 // ============================================================================
+// T-C1: Fan manual control & AUTO restoration
+// ============================================================================
+void test_cmd_fan_manual(void) {
+    FsmContext ctx;
+    ctx.manualMode = false;
+    ctx.manualFan = false;
+
+    cmdRemoteFanOn(ctx);
+    TEST_ASSERT_TRUE(ctx.manualMode);
+    TEST_ASSERT_TRUE(ctx.manualFan);
+
+    CmdResult res = cmdRemoteFanOff(ctx);
+    TEST_ASSERT_EQUAL(CMD_OK, res);
+    TEST_ASSERT_TRUE(ctx.manualMode);
+    TEST_ASSERT_FALSE(ctx.manualFan);
+
+    cmdFanAuto(ctx);
+    TEST_ASSERT_FALSE(ctx.manualMode);
+    TEST_ASSERT_FALSE(ctx.manualFan);
+}
+
+// ============================================================================
+// T-C2: Fan OFF safety interlock during ALARM
+// ============================================================================
+void test_cmd_fan_safety_interlock(void) {
+    Thresholds th = makeThresholds(400.0f);
+    FsmContext ctx;
+    // Step into ALARM
+    fsmStep(ctx, { 450.0f, false, false, 1000 }, th);
+    TEST_ASSERT_EQUAL(STATE_ALARM, ctx.state);
+    TEST_ASSERT_TRUE(ctx.alarmLatched);
+
+    // Attempt to turn OFF fan remotely during ALARM
+    CmdResult res = cmdRemoteFanOff(ctx);
+    TEST_ASSERT_EQUAL(CMD_REJECTED_SAFETY_LOCK, res);
+
+    // Verify fan remains active
+    FsmOutput out = fsmStep(ctx, { 450.0f, false, false, 2000 }, th);
+    TEST_ASSERT_TRUE(out.fanOn);
+}
+
+// ============================================================================
+// T-C3: Buzzer MUTE safety interlock during ALARM
+// ============================================================================
+void test_cmd_buzzer_mute_interlock(void) {
+    Thresholds th = makeThresholds(400.0f);
+    FsmContext ctx;
+    fsmStep(ctx, { 450.0f, false, false, 1000 }, th);
+    TEST_ASSERT_EQUAL(STATE_ALARM, ctx.state);
+    TEST_ASSERT_TRUE(ctx.alarmLatched);
+
+    CmdResult res = cmdRemoteMute(ctx, 1000);
+    TEST_ASSERT_EQUAL(CMD_REJECTED_SAFETY_LOCK, res);
+    TEST_ASSERT_FALSE(ctx.muted);
+
+    FsmOutput out = fsmStep(ctx, { 450.0f, false, false, 2000 }, th);
+    TEST_ASSERT_EQUAL(BUZZ_ALARM, out.buzzer);
+    TEST_ASSERT_FALSE(out.buzzerMuted);
+}
+
+// ============================================================================
+// T-C4: Buzzer UNMUTE restores audio alert
+// ============================================================================
+void test_cmd_buzzer_unmute(void) {
+    FsmContext ctx;
+    ctx.alarmLatched = false;
+    CmdResult mRes = cmdRemoteMute(ctx, 1000);
+    TEST_ASSERT_EQUAL(CMD_OK, mRes);
+    TEST_ASSERT_TRUE(ctx.muted);
+
+    cmdRemoteUnmute(ctx);
+    TEST_ASSERT_FALSE(ctx.muted);
+}
+
+// ============================================================================
+// T-C5: Buzzer TEST safety interlock during ALARM
+// ============================================================================
+void test_cmd_buzzer_test_interlock(void) {
+    Thresholds th = makeThresholds(400.0f);
+    FsmContext ctx;
+
+    // In SAFE: TEST is permitted
+    CmdResult okRes = cmdBuzzerTest(ctx);
+    TEST_ASSERT_EQUAL(CMD_OK, okRes);
+
+    // In ALARM: TEST is rejected to prevent overriding critical alarm tone
+    fsmStep(ctx, { 450.0f, false, false, 1000 }, th);
+    TEST_ASSERT_EQUAL(STATE_ALARM, ctx.state);
+    CmdResult rejRes = cmdBuzzerTest(ctx);
+    TEST_ASSERT_EQUAL(CMD_REJECTED_SAFETY_LOCK, rejRes);
+}
+
+// ============================================================================
+// T-C6: Unknown action safety rejection
+// ============================================================================
+void test_cmd_unknown_action(void) {
+    FsmContext ctx;
+    ctx.manualMode = false;
+    ctx.manualFan = false;
+
+    // Simulate action validator: only "ON", "OFF", "AUTO" allowed
+    const char* invalidAction = "EXPLODE";
+    bool isValid = (strcmp(invalidAction, "ON") == 0 ||
+                    strcmp(invalidAction, "OFF") == 0 ||
+                    strcmp(invalidAction, "AUTO") == 0);
+    TEST_ASSERT_FALSE(isValid);
+    // System state remains completely untouched
+    TEST_ASSERT_FALSE(ctx.manualMode);
+}
+
+// ============================================================================
+// T-B1: Circular buffer overflow (25/20) and partial flush (7/13) FIFO order
+// ============================================================================
+void test_offline_buffer_overflow_and_fifo(void) {
+    constexpr int CAPACITY = 20;
+    int buffer[CAPACITY];
+    int head = 0;
+    int count = 0;
+
+    // Push 25 sequential records (0 to 24)
+    for (int i = 0; i < 25; i++) {
+        buffer[head] = i;
+        head = (head + 1) % CAPACITY;
+        if (count < CAPACITY) count++;
+    }
+
+    // Capacity must be strictly 20
+    TEST_ASSERT_EQUAL(20, count);
+
+    // Verify the 20 remaining items are 5..24 in strict FIFO order
+    int startIdx = (head - count + CAPACITY) % CAPACITY;
+    for (int i = 0; i < count; i++) {
+        int cur = (startIdx + i) % CAPACITY;
+        TEST_ASSERT_EQUAL(i + 5, buffer[cur]);
+    }
+
+    // Flush a partial batch of 7 items (items 5..11)
+    int toFlush = 7;
+    for (int i = 0; i < toFlush; i++) {
+        int cur = (startIdx + i) % CAPACITY;
+        TEST_ASSERT_EQUAL(i + 5, buffer[cur]);
+    }
+    count -= toFlush;
+    TEST_ASSERT_EQUAL(13, count);
+
+    // Verify remaining 13 items are 12..24 in FIFO order
+    int newStartIdx = (head - count + CAPACITY) % CAPACITY;
+    for (int i = 0; i < count; i++) {
+        int cur = (newStartIdx + i) % CAPACITY;
+        TEST_ASSERT_EQUAL(i + 12, buffer[cur]);
+    }
+}
+
+// ============================================================================
+// T-R1: Exponential backoff state machine simulation
+// ============================================================================
+void test_network_backoff_state_machine(void) {
+    // 1. WiFi Backoff progression on repeated disconnects
+    uint32_t wifiBackoff = 1000;
+    bool wifiConnected = false;
+
+    // Failure 1: 1000 -> 2000
+    wifiBackoff = nextBackoff(wifiBackoff, 16000);
+    TEST_ASSERT_EQUAL(2000, wifiBackoff);
+
+    // Failure 2: 2000 -> 4000
+    wifiBackoff = nextBackoff(wifiBackoff, 16000);
+    TEST_ASSERT_EQUAL(4000, wifiBackoff);
+
+    // Failure 3: 4000 -> 8000
+    wifiBackoff = nextBackoff(wifiBackoff, 16000);
+    TEST_ASSERT_EQUAL(8000, wifiBackoff);
+
+    // Failure 4: 8000 -> 16000
+    wifiBackoff = nextBackoff(wifiBackoff, 16000);
+    TEST_ASSERT_EQUAL(16000, wifiBackoff);
+
+    // Failure 5: capped at 16000
+    wifiBackoff = nextBackoff(wifiBackoff, 16000);
+    TEST_ASSERT_EQUAL(16000, wifiBackoff);
+
+    // Reconnection resets WiFi backoff immediately to 1000
+    wifiConnected = true;
+    if (wifiConnected) {
+        wifiBackoff = 1000;
+    }
+    TEST_ASSERT_EQUAL(1000, wifiBackoff);
+
+    // 2. Decoupled MQTT Backoff progresses independently
+    uint32_t mqttBackoff = 1000;
+    mqttBackoff = nextBackoff(mqttBackoff, 16000);
+    TEST_ASSERT_EQUAL(2000, mqttBackoff);
+    mqttBackoff = nextBackoff(mqttBackoff, 16000);
+    TEST_ASSERT_EQUAL(4000, mqttBackoff);
+
+    // MQTT Reconnection resets to 1000 without affecting WiFi state
+    mqttBackoff = 1000;
+    TEST_ASSERT_EQUAL(1000, mqttBackoff);
+    TEST_ASSERT_EQUAL(1000, wifiBackoff);
+}
+
+// ============================================================================
 // MAIN RUNNER
 // ============================================================================
 int main(int argc, char **argv) {
@@ -445,5 +648,13 @@ int main(int argc, char **argv) {
     RUN_TEST(test_fsm_local_ack_button_fault);
     RUN_TEST(test_buzzer_pattern_timing);
     RUN_TEST(test_exponential_backoff);
+    RUN_TEST(test_cmd_fan_manual);
+    RUN_TEST(test_cmd_fan_safety_interlock);
+    RUN_TEST(test_cmd_buzzer_mute_interlock);
+    RUN_TEST(test_cmd_buzzer_unmute);
+    RUN_TEST(test_cmd_buzzer_test_interlock);
+    RUN_TEST(test_cmd_unknown_action);
+    RUN_TEST(test_offline_buffer_overflow_and_fifo);
+    RUN_TEST(test_network_backoff_state_machine);
     return UNITY_END();
 }

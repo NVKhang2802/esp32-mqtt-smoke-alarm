@@ -18,6 +18,7 @@ msg.mq2Valid  = d.mq2_valid !== false;
 msg.dhtValid  = d.dht_valid !== false;
 msg.ppm       = num(d.mq2_ppm);
 msg.temp      = num(d.temp);
+msg.hum       = num(d.hum);
 msg.fsmState  = d.fsm_state;
 msg.alarmTh   = Number(d.alarm_th) || undefined;
 msg.safeTh    = Number(d.safe_th) || undefined;

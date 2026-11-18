@@ -5,27 +5,36 @@ const fleet = flow.get('fleet') || {};
 const cmds = [], logs = [];
 let alert = null;
 
-const dev = id => fleet[id] || (fleet[id] = {
-  deviceId: id,
-  status: 'UNKNOWN',
-  deviceState: 'SAFE',
-  effective: 'SAFE',
-  lastSeen: 0,
-  ppm: NaN,
-  temp: NaN,
-  rate: 0,
-  lastPpm: 0,
-  tempHist: [],
-  alarmTh: 400,
-  safeTh: 300,
-  overActive: false,
-  hotActive: false,
-  cooldownStart: null,
-  lastAlert: 0,
-  topology: null,
-  mq2Valid: true,
-  dhtValid: true
-});
+const dev = id => {
+  let d = fleet[id];
+  if (!d) {
+    d = fleet[id] = {
+      deviceId: id,
+      status: 'UNKNOWN',
+      deviceState: 'SAFE',
+      effective: 'SAFE',
+      lastSeen: 0,
+      ppm: NaN,
+      temp: NaN,
+      rate: 0,
+      lastPpm: 0,
+      hum: 60.0,
+      tempHist: [],
+      alarmTh: 400,
+      safeTh: 300,
+      overActive: false,
+      hotActive: false,
+      cooldownStart: null,
+      lastAlert: 0,
+      topology: null,
+      mq2Valid: true,
+      dhtValid: true
+    };
+  }
+  if (d.rate === undefined) d.rate = 0;
+  if (!Array.isArray(d.tempHist)) d.tempHist = [];
+  return d;
+};
 
 const log = (level, event, desc, id) => logs.push({ level, event, desc, deviceId: id, ts: NOW });
 
@@ -48,6 +57,7 @@ switch (msg.eventType) {
     d.lastSeen = NOW;
     d.status = 'ONLINE';
     d.deviceState = msg.fsmState || d.deviceState;
+    if (Number.isFinite(msg.hum)) d.hum = msg.hum;
     d.alarmTh = msg.alarmTh || d.alarmTh;
     d.safeTh = msg.safeTh || d.safeTh;
     d.mq2Valid = msg.mq2Valid;
@@ -137,8 +147,25 @@ switch (msg.eventType) {
     log('CRITICAL', msg.eventName || 'ALARM_EVENT', 'Su kien tu thiet bi', d.deviceId);
     break;
   }
+  case 'OFFLINE_SYNC': {
+    const d = dev(msg.deviceId);
+    const count = Array.isArray(msg.records) ? msg.records.length : 1;
+    log('INFO', 'OFFLINE_SYNC_RECEIVED', `Dong bo ${count} ban ghi lich su tu thiet bi`, d.deviceId);
+    break;
+  }
+  case 'SCHEDULER_CMD': {
+    const mode = msg.mode || (msg.payload && msg.payload.mode) || 'DAY';
+    const alarmVal = mode === 'NIGHT' ? 350 : 400;
+    const safeVal = alarmVal * 0.75;
+    Object.values(fleet).forEach(d => {
+      d.alarmTh = alarmVal;
+      d.safeTh = safeVal;
+    });
+    log('INFO', 'SCHEDULER_APPLIED', `Lich ${mode}: alarm=${alarmVal}, safe=${safeVal}`, 'ALL');
+    break;
+  }
   case 'FAULT_INJECTION_CMD':
-    log('INFO', 'FAULT_INJECTION_SEEN', 'Chi ghi nhan; trang thai lay tu telemetry thiet bi', msg.deviceId);
+    log('INFO', 'FAULT_INJECTION_SEEN', 'Chi ghi nhan; trang thai lay tu telemetry thiet bi', msg.deviceId || 'ESP32_SMOKE_N04_A01');
     break;
 }
 
@@ -156,6 +183,7 @@ return [
       fleetList: Object.values(fleet),
       ppm: primary.ppm,
       temp: primary.temp,
+      hum: (primary.hum !== undefined && Number.isFinite(primary.hum)) ? primary.hum : 60.0,
       fsmState: primary.effective,
       state: primary.effective,
       alarmThreshold: primary.alarmTh,

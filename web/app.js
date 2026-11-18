@@ -86,7 +86,9 @@ const STATE = {
 const DOM = new Proxy({}, {
   get(target, id) {
     if (!target[id]) {
-      target[id] = document.getElementById(id);
+      target[id] = (typeof document !== 'undefined' && document.getElementById)
+        ? document.getElementById(id)
+        : null;
     }
     return target[id];
   }
@@ -101,22 +103,24 @@ let webAudioCtx = null;
 // =============================================================================
 // 3. INITIALIZATION & LIFECYCLE
 // =============================================================================
-document.addEventListener("DOMContentLoaded", () => {
-  try { initClock(); } catch (e) { console.error("initClock error:", e); }
-  try { initChart(); } catch (e) { console.error("initChart error:", e); }
-  try { initMqttClient(); } catch (e) { console.error("initMqttClient error:", e); }
-  try { initEventHandlers(); } catch (e) { console.error("initEventHandlers error:", e); }
-  try { initFaultInjectionHandlers(); } catch (e) { console.error("initFaultInjectionHandlers error:", e); }
-  try { initSimulatorDefaults(); } catch (e) { console.error("initSimulatorDefaults error:", e); }
+if (typeof document !== 'undefined' && document.addEventListener) {
+  document.addEventListener("DOMContentLoaded", () => {
+    try { initClock(); } catch (e) { console.error("initClock error:", e); }
+    try { initChart(); } catch (e) { console.error("initChart error:", e); }
+    try { initMqttClient(); } catch (e) { console.error("initMqttClient error:", e); }
+    try { initEventHandlers(); } catch (e) { console.error("initEventHandlers error:", e); }
+    try { initFaultInjectionHandlers(); } catch (e) { console.error("initFaultInjectionHandlers error:", e); }
+    try { initSimulatorDefaults(); } catch (e) { console.error("initSimulatorDefaults error:", e); }
 
-  try {
-    addAuditLog("SYSTEM", "APPLICATION_STARTED", "Khởi động giao diện Tầng 4 Application thành công.", "SAFE");
-    updateUiFromState();
-  } catch (e) { console.error("updateUiFromState error:", e); }
+    try {
+      addAuditLog("SYSTEM", "APPLICATION_STARTED", "Khởi động giao diện Tầng 4 Application thành công.", "SAFE");
+      updateUiFromState();
+    } catch (e) { console.error("updateUiFromState error:", e); }
 
-  // Watchdog heartbeat checker
-  setInterval(heartbeatCheck, 2000);
-});
+    // Watchdog heartbeat checker
+    setInterval(heartbeatCheck, 2000);
+  });
+}
 
 // =============================================================================
 // 4. UNIFIED DOWNLINK DISPATCHER
@@ -257,8 +261,6 @@ function handleIncomingMqtt(topic, payloadStr) {
 
       if (data.fsm_state) {
         STATE.fsmState = data.fsm_state;
-      } else {
-        evaluateFsmRules();
       }
 
       if (data.alarm_th) STATE.alarmThreshold = parseFloat(data.alarm_th);
@@ -271,7 +273,12 @@ function handleIncomingMqtt(topic, payloadStr) {
       pushChartData(STATE.ppm, STATE.temp);
     }
     else if (topic === CONFIG.topics.eventAlarm) {
-      triggerAlarmState(data.ppm || STATE.ppm, data.event || "URGENT_ALARM");
+      STATE.fsmState = "ALARM";
+      STATE.fanState = true;
+      STATE.buzzerActive = true;
+      addAuditLog("CRITICAL", data.event || "URGENT_ALARM", `Báo động từ thiết bị: PPM=${data.ppm || STATE.ppm}`, "ALARM");
+      showToast("BÁO ĐỘNG KHẨN CẤP: Thiết bị báo khói nguy cấp!", "danger");
+      updateUiFromState();
     }
     else if (topic === CONFIG.topics.statusAck) {
       addAuditLog("INFO", "DEVICE_ACK", `Phản hồi từ ESP32: Lệnh ${data.cmd || ''} -> ${data.result || 'OK'}`, STATE.fsmState);
@@ -300,108 +307,8 @@ function handleIncomingMqtt(topic, payloadStr) {
 }
 
 // =============================================================================
-// 6. FINITE STATE MACHINE (FSM) & BUSINESS RULES EVALUATION
+// 6. SCADA READ-ONLY STATE ARCHITECTURE (Zero autonomous client-side commands)
 // =============================================================================
-function evaluateFsmRules() {
-  if (!STATE.deviceOnline) return;
-
-  const currentThresh = (STATE.sensitivityMode === "NIGHT")
-    ? CONFIG.thresholds.alarmNight
-    : CONFIG.thresholds.alarmDay;
-
-  const safeThresh = (STATE.sensitivityMode === "NIGHT")
-    ? CONFIG.thresholds.safeNight
-    : CONFIG.thresholds.safeDay;
-
-  // RULE 1: Smoke Hazard (>= 400 PPM or 350 PPM)
-  if (STATE.ppm >= currentThresh) {
-    if (STATE.fsmState !== "ALARM") {
-      triggerAlarmState(STATE.ppm, "SMOKE_HAZARD_DETECTED");
-    }
-    return;
-  }
-
-  // RULE 3: Cooldown Logic (< 300 PPM when in ALARM)
-  if (STATE.fsmState === "ALARM" && STATE.ppm < safeThresh) {
-    triggerCooldownState();
-    return;
-  }
-
-  // In Cooldown: Re-escalation Guard (if smoke rises back >= safeThresh)
-  if (STATE.fsmState === "COOLDOWN") {
-    if (STATE.ppm >= safeThresh) {
-      if (cooldownInterval) clearInterval(cooldownInterval);
-      triggerAlarmState(STATE.ppm, "COOLDOWN_ABORTED_SMOKE_REBOUND");
-    }
-    return;
-  }
-
-  // RULE 2: Overheat Hazard (Temp >= 55.0°C)
-  if (STATE.temp >= CONFIG.thresholds.overheat) {
-    if (STATE.fsmState === "SAFE") {
-      STATE.fsmState = "WARNING";
-      addAuditLog("WARN", "OVERHEAT_DETECTED", `Nhiệt độ môi trường cực cao (${STATE.temp.toFixed(1)}°C >= 55.0°C)`, "WARNING");
-      showToast("Cảnh báo: Phát hiện quá nhiệt môi trường!", "warning");
-    }
-    return;
-  }
-
-  // Normal Safe Return
-  if (STATE.fsmState === "WARNING" && STATE.ppm < (currentThresh - 100) && STATE.temp < 50.0) {
-    STATE.fsmState = "SAFE";
-    addAuditLog("INFO", "RETURN_TO_SAFE", "Nhiệt độ và khói đã ổn định trở lại vùng an toàn.", "SAFE");
-  }
-}
-
-function triggerAlarmState(ppmVal, reason) {
-  STATE.fsmState = "ALARM";
-  STATE.fanState = true;
-  STATE.buzzerActive = true;
-
-  playAlarmAudioBeep();
-
-  addAuditLog("CRITICAL", "SMOKE_ALARM_TRIGGERED", `Khói vượt ngưỡng (${ppmVal.toFixed(1)} PPM >= ${STATE.alarmThreshold} PPM). Quạt BẬT, Còi HÚ!`, "ALARM");
-  showToast("BÁO ĐỘNG KHẨN CẤP: Nồng độ khói vượt ngưỡng an toàn!", "danger");
-
-  dispatchTelegramAlert(
-    `🚨 <b>BÁO ĐỘNG HỎA HOẠN KHẨN CẤP!</b>\n` +
-    `📍 <b>Vị trí:</b> Phòng P302 - Khoa CNTT HUIT\n` +
-    `💨 <b>Nồng độ khói MQ-2:</b> <code>${ppmVal.toFixed(1)} PPM</code>\n` +
-    `🌡️ <b>Nhiệt độ DHT22:</b> <code>${STATE.temp.toFixed(1)} °C</code>\n` +
-    `🌀 <b>Quạt hút DC:</b> ĐÃ TỰ ĐỘNG BẬT CƯỠNG BỨC\n` +
-    `🔔 <b>Còi báo động:</b> ĐANG PHÁT TÍN HIỆU HÚ KHẨN`
-  );
-}
-
-function triggerCooldownState() {
-  STATE.fsmState = "COOLDOWN";
-  STATE.cooldownTimer = 30; // 30s Post-alarm purge delay
-  STATE.fanState = true;    // Fan stays active during cooldown
-  STATE.buzzerActive = false;
-
-  addAuditLog("INFO", "COOLDOWN_STARTED", `Khói hạ dưới ${CONFIG.thresholds.safeDay} PPM. Kích hoạt đếm lùi 30s xả khói tồn dư.`, "COOLDOWN");
-  showToast("Bắt đầu quá trình 30s làm mát & thông gió cưỡng bức (Cooldown Purge)", "warning");
-
-  if (cooldownInterval) clearInterval(cooldownInterval);
-
-  cooldownInterval = setInterval(() => {
-    STATE.cooldownTimer--;
-    updateUiFromState();
-
-    if (STATE.cooldownTimer <= 0) {
-      clearInterval(cooldownInterval);
-      STATE.fsmState = "SAFE";
-      if (STATE.fanMode === "AUTO") {
-        STATE.fanState = false;
-        sendDownlinkCommand("cmdFan", { action: "OFF", reason: "COOLDOWN_FINISHED" });
-      }
-      addAuditLog("INFO", "COOLDOWN_COMPLETED", "Hoàn tất 30s xả khói tồn dư. Quạt tự động trở về SAFE IDLE.", "SAFE");
-      showToast("Quá trình xả khói hoàn tất. Hệ thống trở về trạng thái An toàn.", "success");
-      updateUiFromState();
-    }
-  }, 1000);
-}
-
 function setOfflineState() {
   STATE.deviceOnline = false;
   STATE.fsmState = "OFFLINE";
@@ -942,7 +849,6 @@ function initEventHandlers() {
       STATE.fanMode = "AUTO";
       sendDownlinkCommand("cmdMode", { mode: "AUTO" });
       showToast("Chế độ quạt: Tự động theo FSM", "info");
-      evaluateFsmRules();
       updateUiFromState();
     });
   }
@@ -1005,7 +911,6 @@ function initEventHandlers() {
       sendDownlinkCommand("cmdScheduler", { mode: "DAY" });
       addAuditLog("INFO", "SENSITIVITY_MODE", "Chuyển sang Chế độ Ban ngày (Ngưỡng 400 PPM)", STATE.fsmState);
       showToast("Đã chuyển Chế độ Ban ngày (Ngưỡng 400 PPM)", "info");
-      evaluateFsmRules();
       updateUiFromState();
     });
   }
@@ -1017,7 +922,6 @@ function initEventHandlers() {
       sendDownlinkCommand("cmdScheduler", { mode: "NIGHT" });
       addAuditLog("WARN", "SENSITIVITY_MODE", "Kích hoạt Chế độ Ban đêm (Hạ ngưỡng 350 PPM tăng nhạy)", STATE.fsmState);
       showToast("Đã kích hoạt Chế độ Ban đêm (Ngưỡng 350 PPM)", "warning");
-      evaluateFsmRules();
       updateUiFromState();
     });
   }
@@ -1063,7 +967,6 @@ function initEventHandlers() {
     DOM.simSliderSmoke.addEventListener("input", (e) => {
       STATE.ppm = parseFloat(e.target.value);
       if (DOM.simLblSmoke) DOM.simLblSmoke.textContent = STATE.ppm + " PPM";
-      evaluateFsmRules();
       updateUiFromState();
       pushChartData(STATE.ppm, STATE.temp);
     });
@@ -1073,7 +976,6 @@ function initEventHandlers() {
     DOM.simSliderTemp.addEventListener("input", (e) => {
       STATE.temp = parseFloat(e.target.value);
       if (DOM.simLblTemp) DOM.simLblTemp.textContent = STATE.temp.toFixed(1) + " °C";
-      evaluateFsmRules();
       updateUiFromState();
       pushChartData(STATE.ppm, STATE.temp);
     });
@@ -1172,14 +1074,16 @@ function initFaultInjectionHandlers() {
 }
 
 // Preset helper called from inline buttons
-window.setSimPreset = function(ppmVal, tempVal) {
+const setSimPreset = function(ppmVal, tempVal) {
   STATE.ppm = ppmVal;
   STATE.temp = tempVal;
-  evaluateFsmRules();
   updateUiFromState();
   pushChartData(STATE.ppm, STATE.temp);
   showToast(`Thiết lập giả lập: Khói ${ppmVal} PPM, Nhiệt độ ${tempVal}°C`, "info");
 };
+if (typeof window !== 'undefined') {
+  window.setSimPreset = setSimPreset;
+}
 
 function initSimulatorDefaults() {
   setInterval(() => {
@@ -1232,4 +1136,33 @@ function initClock() {
   setInterval(() => {
     el.textContent = new Date().toLocaleTimeString("vi-VN");
   }, 1000);
+}
+
+// =============================================================================
+// 14. SANITIZATION & COMMONJS EXPORTS (FOR TESTING)
+// =============================================================================
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    CONFIG,
+    STATE,
+    DOM,
+    escapeHtml,
+    renderAuditTable,
+    showToast,
+    handleMqttMessage: handleIncomingMqtt,
+    handleIncomingMqtt,
+    updateUiFromState,
+    setOfflineState,
+    addAuditLog
+  };
 }

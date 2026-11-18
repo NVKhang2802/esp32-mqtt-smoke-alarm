@@ -19,12 +19,14 @@ struct OfflineRecord {
   float hum;
   bool fan;
   bool buzzer;
+  bool mq2Valid;
+  bool dhtValid;
   char state[16];
   char eventType[16]; // "TELEMETRY" or "ALARM_EVENT"
 };
 
 void initOfflineBuffer();
-void pushOfflineRecord(float ppm, float temp, float hum, bool fan, bool buzzer, const char* stateStr, const char* eventType = "TELEMETRY");
+void pushOfflineRecord(float ppm, float temp, float hum, bool fan, bool buzzer, const char* stateStr, const char* eventType = "TELEMETRY", bool mq2Valid = true, bool dhtValid = true);
 void flushOfflineBuffer(PubSubClient& client, const char* topic, int maxBatch = 5);
 int getOfflineBufferCount();
 

@@ -2,7 +2,7 @@
  * @file main.cpp
  * @brief Chuong trinh dieu khien chinh (Main Application Orchestrator)
  * @details De tai 04: He thong bao khoi canh bao som - Nhom 04 (N09)
- *          Kien truc Lean & Clean Code: Zero Heap Fragmentation, Modular SRP.
+ *          Kien truc Lean & Clean Code: Stack/Local-bounded JSON allocation (ArduinoJson v7), Modular SRP.
  */
 
 #include <Arduino.h>
@@ -183,7 +183,7 @@ static void publishTelemetry() {
     g_mqttClient.publish(TOPIC_TELEMETRY, payload);
     g_mqttClient.publish(TOPIC_V2_TELEMETRY, payload);
   } else {
-    pushOfflineRecord(g_mq2h.fault ? 0.0f : g_ppm, g_temp, g_hum, g_out.fanOn, (g_out.buzzer != BUZZ_OFF), getFsmStateString(g_fsm.state), "TELEMETRY");
+    pushOfflineRecord(g_mq2h.fault ? 0.0f : g_ppm, g_temp, g_hum, g_out.fanOn, (g_out.buzzer != BUZZ_OFF), getFsmStateString(g_fsm.state), "TELEMETRY", !g_mq2h.fault, !g_dhth.fault);
   }
 }
 
@@ -205,7 +205,7 @@ static void publishAlarmEvent(bool isCritical) {
     g_mqttClient.publish(TOPIC_EVENT_ALARM, payload);
     g_mqttClient.publish(TOPIC_V2_ALARM, payload);
   } else {
-    pushOfflineRecord(g_ppm, g_temp, g_hum, g_out.fanOn, (g_out.buzzer != BUZZ_OFF), getFsmStateString(g_fsm.state), "ALARM_EVENT");
+    pushOfflineRecord(g_ppm, g_temp, g_hum, g_out.fanOn, (g_out.buzzer != BUZZ_OFF), getFsmStateString(g_fsm.state), "ALARM_EVENT", !g_mq2h.fault, !g_dhth.fault);
   }
   Serial.printf("  [MQTT EVENT] -> ALARM %s (PPM: %.1f)\r\n", isCritical ? "CRITICAL" : "SAFE", g_ppm);
 }
@@ -534,16 +534,19 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
+  g_espClient.setTimeout(2);
   g_mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
   g_mqttClient.setCallback(mqttCallback);
   g_mqttClient.setBufferSize(512);
+  g_mqttClient.setSocketTimeout(2);
 
   recompute();
   Serial.println(F("[SETUP] Initialization complete. Starting non-blocking loop.\r\n"));
 }
 
 void loop() {
-  const uint32_t now = millis();
+  const uint32_t loopStart = millis();
+  const uint32_t now = loopStart;
 
   // 1. Maintain Network connectivity (Non-blocking decoupled backoff)
   netTick(now);
@@ -612,5 +615,11 @@ void loop() {
   if (now - g_lastHeartbeat >= HEARTBEAT_INTERVAL_MS) {
     g_lastHeartbeat = now;
     publishKeepAlive();
+  }
+
+  // 7. Loop Latency Performance Guard
+  const uint32_t loopDuration = millis() - loopStart;
+  if (loopDuration > NET_MAX_BLOCK_MS) {
+    Serial.printf("[PERF WARN] Loop duration %lu ms exceeded NET_MAX_BLOCK_MS (%lu ms)!\r\n", loopDuration, NET_MAX_BLOCK_MS);
   }
 }

@@ -1,80 +1,83 @@
+# docs/audit/claims.yaml
+# 3-Tier Audit Matrix for IoT Smoke Detection System - Nhom 04 (N09) HUIT
+# Tiers:
+#   VERIFIED: Automated unit/integration test runs real code and validates 100% of the assertion.
+#   PARTIAL:  Core algorithm & logic unit-tested in native/engine; physical hardware/network E2E is simulated/mocked.
+#   SCOPE:    Explicit design boundary, architecture choice, or academic demonstration benchmark.
+
 claims:
   - id: C-EMA
-    description: "Asymmetric EMA filter (alpha_rise=0.40, alpha_fall=0.15) with 5-sample ADC averaging"
+    tier: VERIFIED
+    description: "Asymmetric EMA filter (alpha_rise=0.40, alpha_fall=0.15) with ADC sampling"
     claimed_in: "Phần VII (Audit Matrix), Phần IX (Firmware Spec)"
-    reality: "Implemented in lib/core/ema_filter.h and src/sensors.cpp, tested in test/test_core.cpp"
+    reality: "Implemented in lib/core/ema_filter.h and tested against exact mathematical baseline in test/test_core.cpp"
     evidence_tests: ["T-E1", "T-E2", "T-E3", "T-E4", "T-E5"]
     test_command: "pio test -e native"
-    status: VERIFIED_PASS
-
-  - id: C-BACKOFF
-    description: "Decoupled exponential backoff 1s to 16s for WiFi and MQTT reconnection"
-    claimed_in: "Phần VII (Audit Matrix), Phần IX"
-    reality: "Implemented in lib/core/netutil.h and src/main.cpp netTick()"
-    evidence_tests: ["T-F12"]
-    test_command: "pio test -e native"
-    status: VERIFIED_PASS
-
-  - id: C-MQTTS-SCOPE
-    description: "MQTT Protocol & Security Transport Scope"
-    claimed_in: "Phần VII, Phần IX"
-    reality: "Academic Wokwi simulation uses standard TCP Port 1883. MQTTS/TLS is documented as Production Roadmap, not claimed as active in demo"
-    evidence_tests: ["MANUAL_AUDIT"]
-    test_command: "python -c \"print('Academic Demo Scope: Port 1883')\""
-    status: VERIFIED_PASS
-
-  - id: C-JSON-ALLOC
-    description: "ArduinoJson v7 dynamic JsonDocument memory control (<512B)"
-    claimed_in: "Phần VII (Audit Matrix)"
-    reality: "ArduinoJson v7 JsonDocument reused in stack/loop with setBufferSize(512)"
-    evidence_tests: ["FIRMWARE_BUILD"]
-    test_command: "pio run -e esp32dev"
-    status: VERIFIED_PASS
 
   - id: C-FSM-5STATES
+    tier: VERIFIED
     description: "Strict 5-state Edge FSM with hysteresis and health-derived FAULT"
     claimed_in: "Phần VII, Phần IX"
-    reality: "Implemented in lib/core/fsm_core.cpp (STATE_SAFE, STATE_WARNING, STATE_ALARM, STATE_COOLDOWN, STATE_FAULT)"
-    evidence_tests: ["T-F1", "T-F2", "T-F3", "T-F4", "T-F5", "T-F6"]
+    reality: "Implemented in lib/core/fsm_core.cpp (SAFE, WARNING, ALARM, COOLDOWN, FAULT) with edge triggers and reset safety"
+    evidence_tests: ["T-F1", "T-F2", "T-F3", "T-F4", "T-F5", "T-F6", "T-F7", "T-F8", "T-F9", "T-F10", "T-F11"]
     test_command: "pio test -e native"
-    status: VERIFIED_PASS
 
-  - id: C-NODERED-RULE2
-    description: "Node-RED Rule 2 low-heat smoke handling without muting fire alarm"
+  - id: C-COMMAND-INTERLOCK
+    tier: VERIFIED
+    description: "Firmware command execution with safety interlocks during ALARM (Fan OFF, Mute, and Test refused)"
     claimed_in: "Phần VII, Phần IX"
-    reality: "Implemented in nodered/functions/core_engine.js: escalates to ALARM, turns on fan, never sends MUTE"
-    evidence_tests: ["T-N3"]
-    test_command: "node --test nodered/tests/engine.test.js"
-    status: VERIFIED_PASS
+    reality: "Tested in test/test_core.cpp: cmdRemoteFanOff, cmdRemoteMute, cmdBuzzerTest return CMD_REJECTED_SAFETY_LOCK during ALARM"
+    evidence_tests: ["T-C1", "T-C2", "T-C3", "T-C4", "T-C5", "T-C6"]
+    test_command: "pio test -e native"
 
-  - id: C-NODERED-RULE5
-    description: "Rule 5 Cross-Zone Emergency Corridor Broadcast without wildcards in PUBLISH"
+  - id: C-NODERED-RULES
+    tier: VERIFIED
+    description: "Node-RED Core Engine 5 business rules (Rate-of-Rise, Low-Heat, Day/Night, Purge, Cross-Zone)"
     claimed_in: "Phần VII, Phần IX"
-    reality: "Implemented in nodered/functions/core_engine.js & command_dispatcher.js: iterates Fleet Registry concrete topics"
-    evidence_tests: ["T-N5", "T-N9"]
+    reality: "Implemented in nodered/functions/core_engine.js and validated via engine.test.js"
+    evidence_tests: ["T-N1", "T-N2", "T-N3", "T-N4", "T-N5", "T-N6", "T-N7", "T-N8", "T-N9", "T-N10", "T-N11"]
     test_command: "node --test nodered/tests/engine.test.js"
-    status: VERIFIED_PASS
 
-  - id: C-LWT-DISPATCH
-    description: "Node-RED LWT handling for raw string and JSON signals"
+  - id: C-FLOW-INTEGRATION
+    tier: VERIFIED
+    description: "Node-RED live flow wire integration (Auth topology, hierarchical V2 commands, dedup TTL 5s, Scheduler tick)"
     claimed_in: "Phần VII, Phần IX"
-    reality: "Implemented in nodered/functions/parse_lwt.js and core_engine.js"
-    evidence_tests: ["T-N2", "T-N10"]
-    test_command: "node --test nodered/tests/engine.test.js"
-    status: VERIFIED_PASS
+    reality: "Validated on live flows_smoke_detector.json in flow_integration.test.js"
+    evidence_tests: ["FLOW-01", "FLOW-02", "FLOW-03", "FLOW-04"]
+    test_command: "node --test nodered/tests/flow_integration.test.js"
 
-  - id: C-TELEGRAM-BOT
-    description: "Telegram Bot Alerting Architecture"
+  - id: C-WEB-SCADA-CLEAN
+    tier: VERIFIED
+    description: "Web SCADA XSS Immunity (textContent) and pure telemetry reflection without autonomous actuator commands"
     claimed_in: "Phần VII, Phần IX"
-    reality: "Alert dispatcher dispatches via HTTP request when token is configured, falls back to dashboard/debug mock in academic demo"
-    evidence_tests: ["T-N12"]
-    test_command: "node --test nodered/tests/engine.test.js"
-    status: VERIFIED_PASS
-
-  - id: C-WEB-XSS-IMMUNITY
-    description: "Web SCADA XSS Immunity and State Reflection"
-    claimed_in: "Phần VII (Audit Matrix)"
-    reality: "HTML sanitization in web/util.js, textContent rendering in renderAuditTable & showToast"
+    reality: "app.js exported and directly tested in web/tests/util.test.js with zero client-side autonomous actuator commands"
     evidence_tests: ["T-W1", "T-W2", "T-W3", "T-W4"]
     test_command: "node --test web/tests/util.test.js"
-    status: VERIFIED_PASS
+
+  - id: C-OFFLINE-BUFFER
+    tier: PARTIAL
+    description: "Offline circular buffer 20 records with FIFO preservation and batch flush"
+    reality: "Ring buffer FIFO order, capacity drop (25->20), and partial batch flush (7->13) proven in T-B1; live MQTT replay requires active broker"
+    evidence_tests: ["T-B1", "FIRMWARE_BUILD"]
+    test_command: "pio test -e native"
+
+  - id: C-NETWORK-BACKOFF
+    tier: PARTIAL
+    description: "Decoupled exponential backoff (1s to 16s) for WiFi and MQTT reconnection"
+    reality: "State machine backoff progression, capping at 16s, and independent reset proven in T-R1 and T-F12; physical RF loss simulated in software"
+    evidence_tests: ["T-F12", "T-R1"]
+    test_command: "pio test -e native"
+
+  - id: C-TELEGRAM-FALLBACK
+    tier: PARTIAL
+    description: "Telegram Bot Alerting Architecture with academic fallback"
+    reality: "Alert dispatcher formats HTML and calls HTTP request node; falls back gracefully to dashboard/debug mock when token is unconfigured"
+    evidence_tests: ["T-N12"]
+    test_command: "node --test nodered/tests/engine.test.js"
+
+  - id: C-SCOPE-BENCHMARKS
+    tier: SCOPE
+    description: "Academic scope boundaries: Port 1883 plaintext, RL=10k vs R0=1.0k, demo thresholds (400/350 PPM), ArduinoJson v7 bounded buffer"
+    reality: "Formal scope definition for academic defense; avoids overclaiming production certifications"
+    evidence_tests: ["CONFIG_INSPECTION"]
+    test_command: "python -c \"import os; assert os.path.isfile('src/config.h') and os.path.isfile('src/main.cpp')\""

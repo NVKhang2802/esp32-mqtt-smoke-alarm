@@ -10,13 +10,15 @@ void initOfflineBuffer() {
   memset(s_offlineBuffer, 0, sizeof(s_offlineBuffer));
 }
 
-void pushOfflineRecord(float ppm, float temp, float hum, bool fan, bool buzzer, const char* stateStr, const char* eventType) {
+void pushOfflineRecord(float ppm, float temp, float hum, bool fan, bool buzzer, const char* stateStr, const char* eventType, bool mq2Valid, bool dhtValid) {
   s_offlineBuffer[s_offlineHead].timestamp = millis() / 1000;
   s_offlineBuffer[s_offlineHead].ppm = ppm;
   s_offlineBuffer[s_offlineHead].temp = temp;
   s_offlineBuffer[s_offlineHead].hum = hum;
   s_offlineBuffer[s_offlineHead].fan = fan;
   s_offlineBuffer[s_offlineHead].buzzer = buzzer;
+  s_offlineBuffer[s_offlineHead].mq2Valid = mq2Valid;
+  s_offlineBuffer[s_offlineHead].dhtValid = dhtValid;
 
   if (stateStr != nullptr) {
     strncpy(s_offlineBuffer[s_offlineHead].state, stateStr, sizeof(s_offlineBuffer[s_offlineHead].state) - 1);
@@ -51,7 +53,7 @@ void flushOfflineBuffer(PubSubClient& client, const char* topic, int maxBatch) {
   for (int idx = 0; idx < toSend; idx++) {
     const int cur = (startIdx + idx) % OFFLINE_BUF_SIZE;
     snprintf(payload, sizeof(payload),
-      "{\"sync_seq\":%d,\"ts\":%lu,\"type\":\"%s\",\"mq2_ppm\":%.1f,\"temp\":%.1f,\"hum\":%.1f,\"fan\":\"%s\",\"buzzer\":\"%s\",\"state\":\"%s\"}",
+      "{\"sync_seq\":%d,\"ts\":%lu,\"type\":\"%s\",\"mq2_ppm\":%.1f,\"temp\":%.1f,\"hum\":%.1f,\"fan\":\"%s\",\"buzzer\":\"%s\",\"state\":\"%s\",\"mq2_valid\":%s,\"dht_valid\":%s}",
       idx + 1,
       s_offlineBuffer[cur].timestamp,
       s_offlineBuffer[cur].eventType,
@@ -60,7 +62,9 @@ void flushOfflineBuffer(PubSubClient& client, const char* topic, int maxBatch) {
       s_offlineBuffer[cur].hum,
       s_offlineBuffer[cur].fan ? "ON" : "OFF",
       s_offlineBuffer[cur].buzzer ? "ON" : "OFF",
-      s_offlineBuffer[cur].state
+      s_offlineBuffer[cur].state,
+      s_offlineBuffer[cur].mq2Valid ? "true" : "false",
+      s_offlineBuffer[cur].dhtValid ? "true" : "false"
     );
 
     if (!client.publish(topic, payload)) {

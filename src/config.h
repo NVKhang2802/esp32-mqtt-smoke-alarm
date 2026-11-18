@@ -85,9 +85,9 @@ constexpr uint8_t       ADC_SAMPLES             = 5;      ///< So mau trung binh
 // ============================================================================
 // 6. CALIBRATION & THRESHOLD CONSTANTS
 // ============================================================================
-constexpr float MEASURED_RS_AT_CALIB1 = 1.7100f;  ///< Dien tro cam bien kOhm tai 200 PPM (Wokwi)
-constexpr float MEASURED_RS_AT_CALIB2 = 0.8852f;  ///< Dien tro cam bien kOhm tai 1000 PPM (Wokwi)
-constexpr float DEFAULT_ALARM_PPM_DAY = 400.0f;   ///< Nguong bao chay ban ngay (PCCC quy chuan)
+constexpr float MEASURED_RS_AT_CALIB1 = 1.7100f;  ///< Dien tro cam bien Rs tai 200 PPM (Wokwi: Rs=1.71k, R0=Rs/1.71=1.0k, RL=10.0k)
+constexpr float MEASURED_RS_AT_CALIB2 = 0.8852f;  ///< Dien tro cam bien Rs tai 1000 PPM (Wokwi)
+constexpr float DEFAULT_ALARM_PPM_DAY = 400.0f;   ///< Nguong bao chay ban ngay (Gia tri thuc nghiem du an demo)
 constexpr float ALARM_PPM_NIGHT       = 350.0f;   ///< Nguong bao chay ban dem (nhay hon vi it hoat dong)
 
 // ============================================================================

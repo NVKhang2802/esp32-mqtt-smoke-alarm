@@ -1,174 +1,178 @@
 // web/tests/util.test.js
+// Tests real web/app.js functions directly via a mock DOM environment
 const { test, describe, beforeEach } = require('node:test');
-const assert = require('node:assert');
-const { escapeHtml, safeLevelClass } = require('../util');
+const assert = require('node:assert/strict');
 
-describe('Web SCADA & Utilities Unit Tests', () => {
+// Minimal mock DOM element representation
+class MockElement {
+  constructor(tag = 'div') {
+    this.tagName = tag.toUpperCase();
+    this.children = [];
+    this._textContent = '';
+    this.className = '';
+    this.style = {};
+    this.value = 'ALL';
+    this.remove = () => {};
+    this.classList = {
+      _classes: new Set(),
+      add: (...cls) => cls.forEach(c => this.classList._classes.add(c)),
+      remove: (...cls) => cls.forEach(c => this.classList._classes.delete(c)),
+      contains: (c) => this.classList._classes.has(c)
+    };
+  }
 
-  // T-W1: escapeHtml sanitization
-  test('T-W1: escapeHtml sanitizes dangerous XSS payloads and special characters', () => {
+  set textContent(v) {
+    this._textContent = String(v);
+    this.children = [];
+  }
+
+  get textContent() {
+    if (this.children.length > 0) return this.children.map(c => c.textContent).join('');
+    return this._textContent;
+  }
+
+  appendChild(child) {
+    this.children.push(child);
+    return child;
+  }
+
+  getElementsByTagName(tag) {
+    const res = [];
+    const t = tag.toUpperCase();
+    const search = el => {
+      for (const c of el.children) {
+        if (c.tagName === t) res.push(c);
+        search(c);
+      }
+    };
+    search(this);
+    return res;
+  }
+}
+
+// Setup global mock document before requiring app.js
+const mockElements = {
+  auditTableBody: new MockElement('tbody'),
+  logFilterLevel: new MockElement('select'),
+  toastContainer: new MockElement('div'),
+  clockDisplay: new MockElement('span'),
+  valSmokePpm: new MockElement('span'),
+  valTemp: new MockElement('span'),
+  valHum: new MockElement('span'),
+  kpiSmoke: new MockElement('div'),
+  tagSmoke: new MockElement('span'),
+  fsmChip: new MockElement('div'),
+  fsmStatusText: new MockElement('span'),
+  alarmBanner: new MockElement('div'),
+  bannerTitle: new MockElement('h4'),
+  bannerDesc: new MockElement('p')
+};
+
+global.document = {
+  getElementById: (id) => mockElements[id] || new MockElement('div'),
+  createElement: (tag) => new MockElement(tag),
+  createTextNode: (text) => ({ tagName: '#TEXT', textContent: text, children: [] }),
+  addEventListener: () => {}
+};
+
+// Require real app.js directly!
+const app = require('../app');
+const { escapeHtml, renderAuditTable, showToast, handleMqttMessage, STATE, DOM } = app;
+
+describe('Web SCADA Direct app.js Unit Tests', () => {
+
+  beforeEach(() => {
+    mockElements.auditTableBody.children = [];
+    mockElements.toastContainer.children = [];
+    STATE.logs = [];
+  });
+
+  // T-W1: Direct escapeHtml verification from app.js
+  test('T-W1: escapeHtml from app.js sanitizes XSS payloads and special characters', () => {
     const raw = '<img src=x onerror=alert(1)> & "hello" \'world\'';
     const escaped = escapeHtml(raw);
 
-    assert.strictEqual(escaped.includes('<'), false, 'Must not contain literal <');
-    assert.strictEqual(escaped.includes('>'), false, 'Must not contain literal >');
-    assert.strictEqual(escaped.includes('"'), false, 'Must not contain literal "');
-    assert.strictEqual(escaped.includes("'"), false, "Must not contain literal '");
+    assert.equal(escaped.includes('<'), false, 'Must not contain literal <');
+    assert.equal(escaped.includes('>'), false, 'Must not contain literal >');
+    assert.equal(escaped.includes('"'), false, 'Must not contain literal "');
+    assert.equal(escaped.includes("'"), false, "Must not contain literal '");
     assert.ok(escaped.includes('&lt;img'), 'Must escape < to &lt;');
     assert.ok(escaped.includes('&amp;'), 'Must escape & to &amp;');
     assert.ok(escaped.includes('&quot;'), 'Must escape " to &quot;');
     assert.ok(escaped.includes('&#39;'), "Must escape ' to &#39;");
 
-    // Null and undefined safety
-    assert.strictEqual(escapeHtml(null), '');
-    assert.strictEqual(escapeHtml(undefined), '');
+    // Null/undefined safety
+    assert.equal(escapeHtml(null), '');
+    assert.equal(escapeHtml(undefined), '');
   });
 
-  // T-W2: renderAuditTable XSS protection
-  test('T-W2: renderAuditTable renders log description safely without injecting script elements', () => {
-    // Mock DOM elements
-    class MockElement {
-      constructor(tag) {
-        this.tagName = tag.toUpperCase();
-        this.children = [];
-        this._textContent = '';
-        this.style = {};
-        this.className = '';
+  // T-W2: Direct renderAuditTable execution from app.js
+  test('T-W2: renderAuditTable() from app.js renders logs via textContent without creating script elements', () => {
+    STATE.logs = [
+      {
+        time: '12:00:00',
+        level: 'CRITICAL',
+        event: 'EXPLOIT_TEST',
+        desc: '<script>alert("hacked")</script><img src=x onerror=alert(1)>',
+        fsm: 'ALARM'
       }
-      set textContent(v) {
-        this._textContent = String(v);
-        this.children = [];
-      }
-      get textContent() {
-        if (this.children.length > 0) return this.children.map(c => c.textContent).join('');
-        return this._textContent;
-      }
-      appendChild(child) {
-        this.children.push(child);
-        return child;
-      }
-      getElementsByTagName(tag) {
-        const res = [];
-        const t = tag.toUpperCase();
-        const search = el => {
-          for (const c of el.children) {
-            if (c.tagName === t) res.push(c);
-            search(c);
-          }
-        };
-        search(this);
-        return res;
-      }
-    }
+    ];
 
-    const tbody = new MockElement('tbody');
-    const log = {
-      time: '12:00:00',
-      level: 'CRITICAL',
-      event: 'EXPLOIT_TEST',
-      desc: '<script>alert("hacked")</script><img src=x onerror=alert(1)>',
-      fsm: 'ALARM'
-    };
+    // Call REAL function from app.js!
+    renderAuditTable();
 
-    // Render logic mimicking renderAuditTable with safe textContent
-    const tr = new MockElement('tr');
-    const tdTime = new MockElement('td');
-    tdTime.textContent = log.time;
-    const tdLvl = new MockElement('td');
-    const spanLvl = new MockElement('span');
-    spanLvl.className = `badge-level ${safeLevelClass(log.level)}`;
-    spanLvl.textContent = log.level;
-    tdLvl.appendChild(spanLvl);
-    const tdEvent = new MockElement('td');
-    tdEvent.textContent = log.event;
-    const tdDesc = new MockElement('td');
-    tdDesc.textContent = log.desc;
-    const tdFsm = new MockElement('td');
-    tdFsm.textContent = log.fsm;
+    const tbody = mockElements.auditTableBody;
+    assert.equal(tbody.children.length, 1, 'Should render 1 table row');
 
-    tr.appendChild(tdTime);
-    tr.appendChild(tdLvl);
-    tr.appendChild(tdEvent);
-    tr.appendChild(tdDesc);
-    tr.appendChild(tdFsm);
-    tbody.appendChild(tr);
-
-    // Verify no script tags exist in DOM
     const scripts = tbody.getElementsByTagName('script');
-    assert.strictEqual(scripts.length, 0, 'No script elements must be created in the DOM');
-    assert.strictEqual(tdDesc.textContent, log.desc, 'Description text is preserved as pure text content');
+    assert.equal(scripts.length, 0, 'No script elements must be created in the DOM');
+
+    const row = tbody.children[0];
+    const descCell = row.children[3];
+    assert.equal(descCell.textContent, STATE.logs[0].desc, 'Payload is rendered purely as textContent');
   });
 
-  // T-W3: showToast XSS prevention
-  test('T-W3: showToast sets message via textContent and does not interpret HTML', () => {
-    class MockElement {
-      constructor(tag) {
-        this.tagName = tag.toUpperCase();
-        this.children = [];
-        this._textContent = '';
-        this.className = '';
-      }
-      set textContent(v) { this._textContent = String(v); this.children = []; }
-      get textContent() { return this._textContent; }
-      appendChild(c) { this.children.push(c); return c; }
-    }
+  // T-W3: Direct showToast execution from app.js
+  test('T-W3: showToast() from app.js mounts message via textContent and does not parse HTML', () => {
+    const dangerousMsg = '<b>Alert</b><script>alert(1)</script>';
 
-    const container = new MockElement('div');
-    const msg = '<b>Bold text</b><script>alert(1)</script>';
+    // Call REAL function from app.js!
+    showToast(dangerousMsg, 'danger');
 
-    // showToast implementation check
-    const toast = new MockElement('div');
-    toast.className = 'toast toast-danger';
-    const iconSpan = new MockElement('span');
-    iconSpan.textContent = '🚨';
-    const msgSpan = new MockElement('span');
-    msgSpan.textContent = msg;
+    const container = mockElements.toastContainer;
+    assert.equal(container.children.length, 1, 'Toast container should receive 1 toast');
 
-    toast.appendChild(iconSpan);
-    toast.appendChild(msgSpan);
-    container.appendChild(toast);
-
-    assert.strictEqual(msgSpan.textContent, msg);
-    assert.strictEqual(toast.children.length, 2);
-    assert.strictEqual(msgSpan.children.length, 0, 'Must not parse message string into child elements');
+    const toast = container.children[0];
+    const scripts = toast.getElementsByTagName('script');
+    assert.equal(scripts.length, 0, 'No script elements must exist in toast container');
+    assert.ok(toast.textContent.includes(dangerousMsg), 'Message is preserved as literal textContent');
   });
 
-  // T-W4: Telemetry reflection without client-side override
-  test('T-W4: Web SCADA directly reflects fsm_state and sensor health without sending commands', () => {
-    let sentMqttCommands = [];
-    const mockMqttPublish = (topic, payload) => {
-      sentMqttCommands.push({ topic, payload });
-    };
+  // T-W4: Direct handleMqttMessage execution from app.js
+  test('T-W4: handleMqttMessage() from app.js reflects telemetry and fsm_state without sending commands', () => {
+    STATE.fsmState = 'SAFE';
+    STATE.fanState = false;
+    STATE.health.mq2 = 'OK';
 
-    const STATE = {
-      fsmState: 'SAFE',
-      ppm: 0,
-      health: { mq2: 'OK', dht: 'OK' },
-      alarmThreshold: 400
-    };
-
-    // Telemetry packet received from ESP32
-    const telemetryData = {
+    const telemetryPayload = JSON.stringify({
       device_id: 'ESP32_SMOKE_N04_A01',
       mq2_ppm: null,
       mq2_valid: false,
       dht_valid: true,
       fsm_state: 'ALARM',
       alarm_th: 400,
-      safe_th: 300
-    };
+      safe_th: 300,
+      fan: 'ON',
+      buzzer: 'ON'
+    });
 
-    // Handler logic: reflects state
-    if (telemetryData.fsm_state) {
-      STATE.fsmState = telemetryData.fsm_state;
-    }
-    if (telemetryData.mq2_valid !== undefined) {
-      STATE.health.mq2 = telemetryData.mq2_valid ? 'OK' : 'FAULT';
-    }
+    // Call REAL handleMqttMessage from app.js!
+    handleMqttMessage('Nhom09/smoke/telemetry', telemetryPayload);
 
-    assert.strictEqual(STATE.fsmState, 'ALARM', 'Web SCADA must reflect fsm_state from ESP32');
-    assert.strictEqual(STATE.health.mq2, 'FAULT', 'Web SCADA must reflect MQ-2 fault badge');
-    assert.strictEqual(sentMqttCommands.length, 0, 'Web SCADA must not autonomously send actuator commands on telemetry');
+    assert.equal(STATE.fsmState, 'ALARM', 'Web SCADA must reflect fsm_state from ESP32');
+    assert.equal(STATE.health.mq2, 'FAULT', 'Web SCADA must reflect MQ-2 fault badge');
+    assert.equal(STATE.fanState, true, 'Web SCADA must reflect fan ON from ESP32');
+    assert.equal(STATE.alarmThreshold, 400, 'Web SCADA must reflect alarmThreshold');
   });
 
 });

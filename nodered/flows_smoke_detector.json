@@ -314,7 +314,7 @@
     "type": "function",
     "z": "tab_middleware_smoke",
     "name": "Parse & Validate Telemetry",
-    "func": "let data = msg.payload;\nif (typeof data === 'string') {\n    try { data = JSON.parse(data); } catch(e) { return null; }\n}\n\nmsg.eventType = \"TELEMETRY\";\nmsg.deviceId = data.device_id || \"ESP32_SMOKE_N04_A01\";\nmsg.ppm = parseFloat(data.mq2_ppm || data.ppm || 0);\nmsg.temp = parseFloat(data.temp || data.temperature_c || 28.0);\nmsg.hum = parseFloat(data.hum || data.humidity_pct || 60.0);\nmsg.deviceFan = data.fan || \"OFF\";\nmsg.deviceMode = data.mode || \"AUTO\";\nmsg.fsmState = data.fsm_state || \"SAFE\";\nmsg.timestamp = Date.now();\n\nreturn msg;",
+    "func": "// functions/parse_telemetry.js\nlet d = msg.payload;\nif (typeof d === 'string') {\n  try {\n    d = JSON.parse(d);\n  } catch (e) {\n    return null;\n  }\n}\nif (!d || typeof d !== 'object') return null;\n\nconst num = v => (v === null || v === undefined) ? NaN : Number(v);\n\nmsg.eventType = 'TELEMETRY';\nmsg.deviceId  = d.device_id || 'ESP32_SMOKE_N04_A01';\nmsg.uptime    = d.uptime_s !== undefined ? d.uptime_s : d.uptime_sec;\nmsg.mq2Valid  = d.mq2_valid !== false;\nmsg.dhtValid  = d.dht_valid !== false;\nmsg.ppm       = num(d.mq2_ppm);\nmsg.temp      = num(d.temp);\nmsg.fsmState  = d.fsm_state;\nmsg.alarmTh   = Number(d.alarm_th) || undefined;\nmsg.safeTh    = Number(d.safe_th) || undefined;\n\n// ---- DEDUP: TTL 5s ----\nif (msg.uptime !== undefined) {\n  const now = Date.now();\n  const cache = flow.get('dedup') || {};\n  for (const k in cache) {\n    if (now - cache[k] > 5000) delete cache[k];\n  }\n  const key = msg.deviceId + '|' + msg.eventType + '|' + (msg.eventName || '') + '|' + msg.uptime;\n  if (cache[key]) return null;\n  cache[key] = now;\n  flow.set('dedup', cache);\n}\n\nreturn msg;\n",
     "outputs": 1,
     "x": 520,
     "y": 180,
@@ -374,7 +374,7 @@
     "type": "function",
     "z": "tab_middleware_smoke",
     "name": "Parse LWT Signal",
-    "func": "let status = (typeof msg.payload === 'string') ? msg.payload.trim().toLowerCase() : \"\";\nmsg.eventType = \"LWT\";\nmsg.isOnline = (status === \"online\");\nmsg.deviceId = \"ESP32_SMOKE_N04_A01\";\nmsg.timestamp = Date.now();\nreturn msg;",
+    "func": "// functions/parse_lwt.js\nlet s = msg.payload;\nlet id = null;\nlet online = false;\n\ntry {\n  const j = typeof s === 'string' ? JSON.parse(s) : s;\n  if (j && typeof j === 'object') {\n    id = j.device_id;\n    online = String(j.status).toLowerCase() === 'online';\n  } else {\n    online = String(s).trim().toLowerCase() === 'online';\n  }\n} catch (e) {\n  online = String(s).trim().toLowerCase() === 'online';\n}\n\nmsg.eventType = 'LWT';\nmsg.deviceId  = id || 'ESP32_SMOKE_N04_A01';\nmsg.isOnline  = online;\n\nreturn msg;\n",
     "outputs": 1,
     "x": 500,
     "y": 560,
@@ -434,7 +434,7 @@
     "type": "function",
     "z": "tab_middleware_smoke",
     "name": "Core Engine: FSM, 5 Rules & Abnormal Scenarios",
-    "func": "/**\n * TẦNG 3 - MIDDLEWARE AUTOMATION ENGINE (TUẦN 7: BUSINESS RULES & ABNORMAL SCENARIOS)\n * Hỗ trợ hạm đội đa thiết bị, FSM 6 trạng thái, 5 Business Rules, 4 Kịch bản Sự cố Bất thường\n */\n\nlet state = flow.get(\"fsm_state\") || \"SAFE\";\nlet sensitivityMode = flow.get(\"sensitivity_mode\") || \"DAY\";\nlet lastSeen = flow.get(\"last_seen\") || 0;\nlet lastAlertTime = flow.get(\"last_alert_time\") || 0;\nlet cooldownStartTime = flow.get(\"cooldown_start\") || null;\nlet lastTemp = flow.get(\"last_temp\") || 28.0;\nlet lastTempTime = flow.get(\"last_temp_time\") || Date.now();\nlet smokeSpikeStartTime = flow.get(\"smoke_spike_start\") || null;\nlet fanCmdState = flow.get(\"fan_cmd_state\") || \"OFF\";\nlet buzzerCmdState = flow.get(\"buzzer_cmd_state\") || \"OFF\";\nlet activeFaultCode = flow.get(\"active_fault_code\") || \"NONE\";\n\nlet fleet = flow.get(\"device_fleet\") || {\n    \"ESP32_SMOKE_N04_A01\": {\n        deviceId: \"ESP32_SMOKE_N04_A01\",\n        zone: \"Phòng Lab IoT (P302)\",\n        status: \"ONLINE\",\n        fsmState: \"SAFE\",\n        lastSeen: Date.now(),\n        ppm: 145.0,\n        temp: 28.5,\n        freeHeap: 182400,\n        rssi: -58\n    }\n};\n\nlet now = Date.now();\n\n// Rule 3: Dynamic Threshold Scheduler (Ngưỡng Ngày / Đêm thích ứng)\nlet currentHour = new Date().getHours();\nlet isNight = (sensitivityMode === \"NIGHT\") || (currentHour >= 22 || currentHour < 6);\nlet ALARM_THRESHOLD = isNight ? 350.0 : 400.0;\nlet SAFE_THRESHOLD = isNight ? 250.0 : 300.0;\nconst COOLDOWN_PURGE_DURATION_MS = 30000; // Rule 4: 30s Post-Alarm Purge Delay\nconst WATCHDOG_TIMEOUT_MS = 30000;       // Abnormal 3: 30s Watchdog (3 missed keep-alives)\nconst ALERT_RATE_LIMIT_MS = 20000;\n\nlet commands = [];\nlet logs = [];\nlet uiUpdates = {};\nlet alertMessage = null;\n\n// ==========================================\n// 1. XỬ LÝ LỆNH SCHEDULER & FAULT INJECTION\n// ==========================================\nif (msg.eventType === \"SCHEDULER_CMD\") {\n    let mode = (msg.mode || \"DAY\").toUpperCase();\n    sensitivityMode = mode;\n    flow.set(\"sensitivity_mode\", sensitivityMode);\n    logs.push({ level: \"INFO\", event: \"RULE_3_SCHEDULER_CHANGED\", desc: `Cập nhật Scheduler: Chế độ ${mode} (Alarm: ${mode===\"NIGHT\"?350:400} PPM, Safe: ${mode===\"NIGHT\"?250:300} PPM)` });\n}\n\nif (msg.eventType === \"FAULT_INJECTION_CMD\") {\n    let fType = msg.fault || \"NONE\";\n    activeFaultCode = fType;\n    if (fType === \"CLEAR\" || fType === \"RESTORE\") {\n        activeFaultCode = \"NONE\";\n        if (state === \"FAULT\") state = \"SAFE\";\n        logs.push({ level: \"INFO\", event: \"FAULT_CLEARED\", desc: \"Đã xóa toàn bộ lỗi giả lập. Hệ thống trở về SAFE.\" });\n    } else {\n        state = \"FAULT\";\n        logs.push({ level: \"ERROR\", event: \"ABNORMAL_SIMULATED\", desc: `Kích hoạt sự cố giả lập: ${fType} -> Chuyển sang FAIL-SAFE Mode` });\n    }\n}\n\n// ==========================================\n// 2. XỬ LÝ OFFLINE BUFFER SYNC (ABNORMAL SCENARIO 2)\n// ==========================================\nif (msg.eventType === \"OFFLINE_SYNC\") {\n    logs.push({\n        level: \"INFO\",\n        event: \"OFFLINE_REPLAY_SYNC\",\n        desc: `Đồng bộ bản ghi ngoại tuyến seq=${msg.syncSeq}: PPM=${msg.ppm}, Temp=${msg.temp}°C, Fan=${msg.fan}, Trạng thái=${msg.recordState}`\n    });\n}\n\n// ==========================================\n// 3. XỬ LÝ KEEP-ALIVE & WATCHDOG (ABNORMAL SCENARIO 3)\n// ==========================================\nif (msg.eventType === \"KEEP_ALIVE\") {\n    let devId = msg.deviceId;\n    lastSeen = now;\n    if (state === \"OFFLINE\") state = \"SAFE\";\n\n    if (!fleet[devId]) {\n        fleet[devId] = { deviceId: devId, zone: \"Khu Vực Chung\", status: \"ONLINE\", fsmState: \"SAFE\" };\n    }\n    fleet[devId].lastSeen = now;\n    fleet[devId].status = \"ONLINE\";\n    fleet[devId].freeHeap = msg.freeHeap;\n    fleet[devId].rssi = msg.wifiRssi;\n\n    if (msg.status === \"FAULT\") {\n        state = \"FAULT\";\n        activeFaultCode = \"HARDWARE_REPORTED_FAULT\";\n        logs.push({ level: \"ERROR\", event: \"HARDWARE_FAULT\", desc: `Thiết bị ${devId} báo lỗi phần cứng trong gói tin Heartbeat!` });\n    }\n\n    logs.push({ level: \"INFO\", event: \"KEEP_ALIVE_PONG\", desc: `Tín hiệu Keep-Alive từ ${devId} (Heap: ${msg.freeHeap}B, RSSI: ${msg.wifiRssi}dBm)` });\n}\n\nif (msg.eventType === \"WATCHDOG_TICK\") {\n    for (let dId in fleet) {\n        let dev = fleet[dId];\n        if (dev.status !== \"OFFLINE\" && (now - dev.lastSeen > WATCHDOG_TIMEOUT_MS)) {\n            dev.status = \"OFFLINE\";\n            logs.push({\n                level: \"CRITICAL\",\n                event: \"WATCHDOG_DEAD_DEVICE\",\n                desc: `CẢNH BÁO: Thiết bị ${dId} mất nhịp tim liên tiếp quá 30s! Kích hoạt quy trình cảnh báo Dead Device!`\n            });\n            alertMessage = {\n                title: \"🚨 BÁO ĐỘNG ĐỘT TỬ THIẾT BỊ (WATCHDOG)\",\n                device: dId,\n                desc: \"Thiết bị mất liên lạc > 30s. Nguy cơ mất an toàn PCCC!\"\n            };\n        }\n    }\n    if (state !== \"OFFLINE\" && lastSeen > 0 && (now - lastSeen > WATCHDOG_TIMEOUT_MS)) {\n        state = \"OFFLINE\";\n    }\n}\n\n// ==========================================\n// 4. XỬ LÝ TELEMETRY & 5 BUSINESS RULES\n// ==========================================\nif (msg.eventType === \"TELEMETRY\" || msg.eventType === \"URGENT_ALARM\") {\n    let devId = msg.deviceId;\n    lastSeen = now;\n    if (state === \"OFFLINE\") state = \"SAFE\";\n\n    let ppm = msg.ppm || 0;\n    let temp = msg.temp || 28.0;\n    let hum = msg.hum || 60.0;\n\n    // Abnormal 1: Phát hiện bất thường cảm biến (MQ-2 ADC sat day hoac DHT NaN)\n    if (ppm > 5000.0 || temp < -10.0 || temp > 100.0) {\n        state = \"FAULT\";\n        activeFaultCode = \"SENSOR_ANOMALY_OUT_OF_RANGE\";\n        logs.push({ level: \"ERROR\", event: \"SENSOR_MALFUNCTION\", desc: `Số đo cảm biến vượt giới hạn vật lý (PPM=${ppm}, Temp=${temp}°C)!` });\n    }\n\n    // Tính gia tốc tăng nhiệt độ dT/dt (°C / phút)\n    let dtMinutes = (now - lastTempTime) / 60000.0;\n    let rateOfRise = (dtMinutes > 0.05) ? ((temp - lastTemp) / dtMinutes) : 0.0;\n    lastTemp = temp;\n    lastTempTime = now;\n\n    if (!fleet[devId]) {\n        fleet[devId] = { deviceId: devId, zone: \"Khu Vực Tầng 3\", status: \"ONLINE\", fsmState: \"SAFE\" };\n    }\n    fleet[devId].lastSeen = now;\n    fleet[devId].ppm = ppm;\n    fleet[devId].temp = temp;\n    fleet[devId].status = \"ONLINE\";\n\n    uiUpdates = { ppm: ppm, temp: temp, hum: hum, rateOfRise: rateOfRise };\n\n    // RULE 1: Multi-Sensor Correlation (Tương quan Đa cảm biến: Khói + Gia tốc nhiệt)\n    let isRealFire = (ppm >= ALARM_THRESHOLD) && (rateOfRise >= 3.0 || temp >= 50.0);\n    \n    // RULE 2: False Alarm / Transient Smoke Spike Suppression (Lọc khói thoáng qua)\n    let isTransientSmoke = (ppm >= ALARM_THRESHOLD) && (temp < 35.0) && (!isRealFire);\n\n    if (isRealFire) {\n        state = \"ALARM\";\n        cooldownStartTime = null;\n        smokeSpikeStartTime = null;\n        logs.push({\n            level: \"CRITICAL\",\n            event: \"REAL_FIRE_CONFIRMED\",\n            desc: `HỎA HOẠN THỰC SỰ: Khói ${ppm.toFixed(1)} PPM kèm nhiệt độ tăng vọt (${rateOfRise.toFixed(1)}°C/min hoặc ${temp.toFixed(1)}°C)! Kích hoạt FULL ALARM ngay!`\n        });\n        commands.push({ topic: \"Nhom09/smoke/cmd/fan\", payload: { action: \"ON\", reason: \"RULE_1_REAL_FIRE\" } });\n        commands.push({ topic: \"Nhom09/smoke/cmd/buzzer\", payload: { action: \"UNMUTE\", reason: \"RULE_1_REAL_FIRE\" } });\n        \n        // RULE 5: Cross-Zone Broadcast khi khói >= 600 PPM\n        if (ppm >= 600.0) {\n            logs.push({ level: \"CRITICAL\", event: \"CROSS_ZONE_BROADCAST\", desc: `Khói mức ĐẠI NGUY HIỂM (${ppm.toFixed(1)} PPM). Kích hoạt còi toàn bộ Hành lang Tầng 3 (Zone F03)!` });\n            commands.push({ topic: \"Nhom09/smoke/v2/HUIT_A/F03/+/cmd/buzzer\", payload: { cmd_id: \"CMD-ZONE-EVACUATION\", action: \"UNMUTE\", priority: \"CRITICAL\" } });\n        }\n\n        if (now - lastAlertTime > ALERT_RATE_LIMIT_MS) {\n            alertMessage = { title: \"🔥 CHÁY THỰC SỰ ĐƯỢC XÁC NHẬN!\", ppm: ppm, temp: temp, rateOfRise: rateOfRise, device: devId };\n            lastAlertTime = now;\n        }\n    } else if (isTransientSmoke) {\n        if (!smokeSpikeStartTime) smokeSpikeStartTime = now;\n        let spikeDuration = (now - smokeSpikeStartTime) / 1000;\n        \n        if (spikeDuration < 10) {\n            // Lọc khói thoáng qua: Chỉ bật quạt thông gió, ngắt còi tránh hoảng loạn\n            logs.push({\n                level: \"WARN\",\n                event: \"TRANSIENT_SMOKE_SUPPRESSED\",\n                desc: `Khói tăng ${ppm.toFixed(1)} PPM nhưng nhiệt độ bình thường (${temp.toFixed(1)}°C, thời gian ${spikeDuration.toFixed(1)}s < 10s). Bật quạt thông gió, không hú còi.`\n            });\n            commands.push({ topic: \"Nhom09/smoke/cmd/fan\", payload: { action: \"ON\", reason: \"RULE_2_PURGE_VENTILATION\" } });\n            commands.push({ topic: \"Nhom09/smoke/cmd/buzzer\", payload: { action: \"MUTE\", reason: \"RULE_2_SUPPRESSION\" } });\n            state = \"WARNING\";\n        } else {\n            // Khói duy trì > 10s -> Nâng lên ALARM\n            state = \"ALARM\";\n            commands.push({ topic: \"Nhom09/smoke/cmd/buzzer\", payload: { action: \"UNMUTE\", reason: \"PERSISTENT_SMOKE\" } });\n        }\n    } else if (ppm >= ALARM_THRESHOLD) {\n        state = \"ALARM\";\n        cooldownStartTime = null;\n        commands.push({ topic: \"Nhom09/smoke/cmd/fan\", payload: { action: \"ON\", reason: \"STANDARD_ALARM\" } });\n        commands.push({ topic: \"Nhom09/smoke/cmd/buzzer\", payload: { action: \"UNMUTE\", reason: \"STANDARD_ALARM\" } });\n    }\n    // RULE 4: Cooldown Purge Hysteresis (30s)\n    else if (state === \"ALARM\" && ppm <= SAFE_THRESHOLD) {\n        state = \"COOLDOWN\";\n        cooldownStartTime = now;\n        smokeSpikeStartTime = null;\n        logs.push({\n            level: \"INFO\",\n            event: \"RULE_4_COOLDOWN_PURGE_STARTED\",\n            desc: `Khói đã hạ về mức an toàn (${ppm.toFixed(1)} <= ${SAFE_THRESHOLD} PPM). Kích hoạt thông gió cưỡng bức trễ 30s!`\n        });\n        commands.push({ topic: \"Nhom09/smoke/cmd/buzzer\", payload: { action: \"MUTE\", reason: \"COOLDOWN_SAFE\" } });\n    }\n    else if (state === \"COOLDOWN\") {\n        if (ppm >= SAFE_THRESHOLD) {\n            state = \"ALARM\";\n            cooldownStartTime = null;\n            logs.push({ level: \"WARN\", event: \"COOLDOWN_ABORTED\", desc: \"Khói tăng trở lại trong lúc Cooldown! Tái kích hoạt ALARM.\" });\n        } else if (now - cooldownStartTime >= COOLDOWN_PURGE_DURATION_MS) {\n            state = \"SAFE\";\n            cooldownStartTime = null;\n            logs.push({ level: \"INFO\", event: \"RULE_4_PURGE_COMPLETED\", desc: \"Hoàn tất 30s thông gió cưỡng bức. Trả quạt về trạng thái IDLE an toàn.\" });\n            commands.push({ topic: \"Nhom09/smoke/cmd/fan\", payload: { action: \"OFF\", reason: \"PURGE_COMPLETED\" } });\n        }\n    } else if (state === \"SAFE\" && ppm >= 250.0 && ppm < ALARM_THRESHOLD) {\n        state = \"WARNING\";\n    } else if (state === \"WARNING\" && ppm < 250.0 && temp < 50.0) {\n        state = \"SAFE\";\n    }\n\n    fleet[devId].fsmState = state;\n}\n\n// Lưu Context\nflow.set(\"fsm_state\", state);\nflow.set(\"device_fleet\", fleet);\nflow.set(\"last_seen\", lastSeen);\nflow.set(\"last_alert_time\", lastAlertTime);\nflow.set(\"cooldown_start\", cooldownStartTime);\nflow.set(\"last_temp\", lastTemp);\nflow.set(\"last_temp_time\", lastTempTime);\nflow.set(\"smoke_spike_start\", smokeSpikeStartTime);\nflow.set(\"active_fault_code\", activeFaultCode);\nflow.set(\"fan_cmd_state\", fanCmdState);\nflow.set(\"buzzer_cmd_state\", buzzerCmdState);\n\n// Lưu vào mảng Lịch sử sự kiện (Circular Buffer 50 mục)\nlet eventHistory = flow.get(\"event_history\") || [];\nfor (let lg of logs) {\n    eventHistory.unshift({\n        time: new Date().toLocaleTimeString('vi-VN') + \" \" + new Date().toLocaleDateString('vi-VN'),\n        level: lg.level,\n        event: lg.event,\n        desc: lg.desc,\n        fsmState: state\n    });\n}\nif (eventHistory.length > 50) eventHistory = eventHistory.slice(0, 50);\nflow.set(\"event_history\", eventHistory);\n\n// Output: Commands, Logs, UI Updates, Alerts\nlet outCommands = (commands.length > 0) ? commands.map(c => ({ topic: c.topic, payload: JSON.stringify(c.payload), qos: 1 })) : null;\nlet outLogs = (logs.length > 0) ? { payload: logs, eventHistory: eventHistory } : null;\n\nlet outUI = {\n    payload: {\n        fsmState: state,\n        sensitivityMode: sensitivityMode,\n        alarmThreshold: ALARM_THRESHOLD,\n        activeFaultCode: activeFaultCode,\n        cooldownRemaining: cooldownStartTime ? Math.max(0, Math.ceil((COOLDOWN_PURGE_DURATION_MS - (now - cooldownStartTime))/1000)) : 0,\n        fleetList: Object.values(fleet),\n        ...uiUpdates\n    }\n};\n\nlet outAlert = alertMessage ? { payload: alertMessage } : null;\n\nreturn [outCommands, outLogs, outUI, outAlert];",
+    "func": "// functions/core_engine.js  (4 output: lenh, log, fleet, thong bao)\nconst NOW = Date.now();\nconst FLOOR = 'F03', CROSS_PPM = 600, CROSS_RATE_MS = 60000, WATCHDOG_MS = 30000, ALERT_RATE_MS = 20000;\nconst fleet = flow.get('fleet') || {};\nconst cmds = [], logs = [];\nlet alert = null;\n\nconst dev = id => fleet[id] || (fleet[id] = {\n  deviceId: id,\n  status: 'UNKNOWN',\n  deviceState: 'SAFE',\n  effective: 'SAFE',\n  lastSeen: 0,\n  ppm: NaN,\n  temp: NaN,\n  rate: 0,\n  lastPpm: 0,\n  tempHist: [],\n  alarmTh: 400,\n  safeTh: 300,\n  overActive: false,\n  hotActive: false,\n  cooldownStart: null,\n  lastAlert: 0,\n  topology: null,\n  mq2Valid: true,\n  dhtValid: true\n});\n\nconst log = (level, event, desc, id) => logs.push({ level, event, desc, deviceId: id, ts: NOW });\n\nconst topicOf = (d, kind) => (d.topology && d.topology.building && d.topology.floor && d.topology.room)\n  ? `Nhom09/smoke/v2/${d.topology.building}/${d.topology.floor}/${d.topology.room}/${d.deviceId}/cmd/${kind}`\n  : `Nhom09/smoke/cmd/${kind}`;\n\nconst cmd = (d, kind, payload) => ({ topic: topicOf(d, kind), payload });\n\nconst notify = (d, text) => {\n  if (NOW - d.lastAlert > ALERT_RATE_MS) {\n    d.lastAlert = NOW;\n    alert = { deviceId: d.deviceId, text };\n  }\n};\n\nswitch (msg.eventType) {\n  case 'TELEMETRY': {\n    const d = dev(msg.deviceId);\n    d.lastSeen = NOW;\n    d.status = 'ONLINE';\n    d.deviceState = msg.fsmState || d.deviceState;\n    d.alarmTh = msg.alarmTh || d.alarmTh;\n    d.safeTh = msg.safeTh || d.safeTh;\n    d.mq2Valid = msg.mq2Valid;\n    d.dhtValid = msg.dhtValid;\n    d.cooldownStart = d.deviceState === 'COOLDOWN' ? (d.cooldownStart || NOW) : null;\n\n    // Rule 1: dT/dt theo cua so; mau cu nhat co tuoi >= 20 s trong 60 s; giu rate giua cac lan tinh\n    if (d.dhtValid && Number.isFinite(msg.temp)) {\n      d.temp = msg.temp;\n      d.tempHist.push({ t: NOW, v: msg.temp });\n      d.tempHist = d.tempHist.filter(s => NOW - s.t <= 60000);\n      const ref = d.tempHist.find(s => NOW - s.t >= 20000);\n      if (ref) d.rate = (msg.temp - ref.v) / ((NOW - ref.t) / 60000);\n    } else {\n      d.rate = 0;\n    }\n\n    d.effective = d.deviceState;\n    if (!d.mq2Valid || !Number.isFinite(msg.ppm)) {\n      if (d.deviceState !== 'ALARM') d.effective = 'FAULT'; // khong dung PPM cua cam bien hong\n    } else {\n      d.ppm = msg.ppm;\n      const over = msg.ppm >= d.alarmTh;\n      const hot = d.rate >= 3.0 || msg.temp >= 50.0;\n      if (over) {\n        d.effective = 'ALARM'; // chi leo thang\n        if (!d.overActive) { // canh vuot nguong\n          d.overActive = true;\n          cmds.push(cmd(d, 'fan', { action: 'ON', reason: hot ? 'RULE_1_REAL_FIRE' : 'RULE_2_LOW_HEAT_SMOKE', priority: 'CRITICAL' }));\n          log(hot ? 'CRITICAL' : 'WARN', hot ? 'REAL_FIRE_CONFIRMED' : 'SMOKE_LOW_HEAT_ALARM',\n              `PPM=${msg.ppm} dT/dt=${d.rate.toFixed(1)} T=${msg.temp}`, d.deviceId);\n          notify(d, `Khoi ${msg.ppm} PPM, nhiet ${msg.temp} C, dT/dt ${d.rate.toFixed(1)}`);\n        }\n        if (hot && !d.hotActive) {\n          d.hotActive = true;\n          cmds.push(cmd(d, 'buzzer', { action: 'UNMUTE', reason: 'RULE_1_REAL_FIRE', priority: 'CRITICAL' }));\n        }\n      } else if (msg.ppm <= d.safeTh) {\n        d.overActive = false;\n        d.hotActive = false;\n      }\n\n      // Rule 5: canh vuot 600 PPM, gioi han 60 s, chi gui toi thiet bi cung tang co topic hop le\n      if (msg.ppm >= CROSS_PPM && d.lastPpm < CROSS_PPM && NOW - (flow.get('last_cross_zone') || 0) > CROSS_RATE_MS) {\n        flow.set('last_cross_zone', NOW);\n        log('CRITICAL', 'CROSS_ZONE_BROADCAST', `PPM=${msg.ppm} tai ${d.deviceId}: so tan tang ${FLOOR}`, d.deviceId);\n        Object.values(fleet)\n          .filter(x => x.deviceId !== d.deviceId && x.topology && x.topology.floor === FLOOR && x.topology.building && x.topology.room)\n          .forEach(x => cmds.push(cmd(x, 'buzzer', { cmd_id: 'CMD-ZONE-EVACUATION', action: 'UNMUTE', priority: 'CRITICAL' })));\n      }\n      d.lastPpm = msg.ppm;\n    }\n    break;\n  }\n  case 'KEEP_ALIVE': {\n    const d = dev(msg.deviceId);\n    d.lastSeen = NOW;\n    if (d.status !== 'ONLINE') d.status = 'ONLINE';\n    break;\n  }\n  case 'LWT': {\n    const d = dev(msg.deviceId);\n    if (!msg.isOnline) {\n      d.status = 'OFFLINE';\n      d.effective = 'OFFLINE';\n      log('CRITICAL', 'LWT_DISCONNECT', 'Broker bao thiet bi mat ket noi', d.deviceId);\n      notify(d, 'Thiet bi mat ket noi (LWT)');\n    } else {\n      d.status = 'ONLINE';\n      d.lastSeen = NOW;\n      log('INFO', 'LWT_CONNECT', 'Thiet bi ket noi lai', d.deviceId);\n    }\n    break;\n  }\n  case 'WATCHDOG_TICK':\n    Object.values(fleet).forEach(d => {\n      if (d.status === 'ONLINE' && d.lastSeen && NOW - d.lastSeen > WATCHDOG_MS) {\n        d.status = 'OFFLINE';\n        d.effective = 'OFFLINE';\n        log('CRITICAL', 'WATCHDOG_TIMEOUT', 'Qua 30 s khong co du lieu', d.deviceId);\n        notify(d, 'Thiet bi im lang qua 30 s');\n      }\n    });\n    break;\n  case 'ALARM_EVENT': {\n    const d = dev(msg.deviceId);\n    log('CRITICAL', msg.eventName || 'ALARM_EVENT', 'Su kien tu thiet bi', d.deviceId);\n    break;\n  }\n  case 'FAULT_INJECTION_CMD':\n    log('INFO', 'FAULT_INJECTION_SEEN', 'Chi ghi nhan; trang thai lay tu telemetry thiet bi', msg.deviceId);\n    break;\n}\n\nflow.set('fleet', fleet);\nif (logs.length) flow.set('history', logs.concat(flow.get('history') || []).slice(0, 80));\n\nconst primary = fleet['ESP32_SMOKE_N04_A01'] || Object.values(fleet)[0] || {};\n\nreturn [\n  cmds.length ? cmds.map(c => ({ topic: c.topic, payload: JSON.stringify(c.payload), qos: 1 })) : null,\n  logs.length ? { payload: logs } : null,\n  {\n    payload: {\n      fleet: Object.values(fleet),\n      fleetList: Object.values(fleet),\n      ppm: primary.ppm,\n      temp: primary.temp,\n      fsmState: primary.effective,\n      state: primary.effective,\n      alarmThreshold: primary.alarmTh,\n      safeThreshold: primary.safeTh\n    }\n  },\n  alert ? { payload: alert } : null\n];\n",
     "outputs": 4,
     "noerr": 0,
     "x": 860,
@@ -450,7 +450,7 @@
         "fn_ui_dashboard_adapter"
       ],
       [
-        "debug_alert_notifications"
+        "fn_alert_dispatcher"
       ]
     ]
   },
@@ -459,57 +459,23 @@
     "type": "function",
     "z": "tab_middleware_smoke",
     "name": "Dịch vụ 3: Command Dispatcher (3a)",
-    "func": "return [msg];",
+    "func": "// functions/command_dispatcher.js\nif (typeof msg.topic !== 'string' || /[+#]/.test(msg.topic)) {\n  node.warn('Bo qua topic khong hop le: ' + msg.topic);\n  return null;\n}\nreturn msg;\n",
     "outputs": 1,
     "x": 1140,
     "y": 380,
     "wires": [
       [
-        "router_mqtt_downlink"
-      ]
-    ]
-  },
-  {
-    "id": "router_mqtt_downlink",
-    "type": "switch",
-    "z": "tab_middleware_smoke",
-    "name": "Route by Downlink Topic",
-    "property": "topic",
-    "propertyType": "msg",
-    "rules": [
-      {
-        "t": "cont",
-        "v": "/cmd/fan",
-        "vt": "str"
-      },
-      {
-        "t": "cont",
-        "v": "/cmd/buzzer",
-        "vt": "str"
-      }
-    ],
-    "checkall": "true",
-    "repair": false,
-    "outputs": 2,
-    "x": 1150,
-    "y": 460,
-    "wires": [
-      [
-        "mqtt_out_fan_downlink",
-        "debug_cmd_sent"
-      ],
-      [
-        "mqtt_out_buzzer_downlink",
+        "mqtt_out_cmd_downlink",
         "debug_cmd_sent"
       ]
     ]
   },
   {
-    "id": "mqtt_out_fan_downlink",
+    "id": "mqtt_out_cmd_downlink",
     "type": "mqtt out",
     "z": "tab_middleware_smoke",
-    "name": "Downlink: Nhom09/smoke/cmd/fan",
-    "topic": "Nhom09/smoke/cmd/fan",
+    "name": "Pub: Command Downlink (Dynamic msg.topic)",
+    "topic": "",
     "qos": "1",
     "retain": "false",
     "broker": "broker_emqx_cloud",
@@ -518,17 +484,45 @@
     "wires": []
   },
   {
-    "id": "mqtt_out_buzzer_downlink",
-    "type": "mqtt out",
+    "id": "fn_alert_dispatcher",
+    "type": "function",
     "z": "tab_middleware_smoke",
-    "name": "Downlink: Nhom09/smoke/cmd/buzzer",
-    "topic": "Nhom09/smoke/cmd/buzzer",
-    "qos": "1",
-    "retain": "false",
-    "broker": "broker_emqx_cloud",
-    "x": 1420,
-    "y": 500,
-    "wires": []
+    "name": "Alert & Telegram Dispatcher",
+    "func": "// functions/alert_dispatcher.js (output 1 -> http request, output 2 -> dashboard + debug)\nconst token = env.get('TELEGRAM_TOKEN');\nconst chat = env.get('TELEGRAM_CHAT_ID');\nconst text = '[' + msg.payload.deviceId + '] ' + msg.payload.text;\n\nif (!token || !chat) {\n  return [null, { payload: text }];\n}\n\nreturn [\n  {\n    method: 'POST',\n    url: 'https://api.telegram.org/bot' + token + '/sendMessage',\n    headers: { 'content-type': 'application/json' },\n    payload: JSON.stringify({ chat_id: chat, text: text })\n  },\n  { payload: text }\n];\n",
+    "outputs": 2,
+    "x": 1080,
+    "y": 660,
+    "wires": [
+      [
+        "http_req_telegram"
+      ],
+      [
+        "debug_alert_notifications"
+      ]
+    ]
+  },
+  {
+    "id": "http_req_telegram",
+    "type": "http request",
+    "z": "tab_middleware_smoke",
+    "name": "Telegram Bot API (Simulated/Real)",
+    "method": "use",
+    "ret": "txt",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 1330,
+    "y": 640,
+    "wires": [
+      [
+        "debug_alert_notifications"
+      ]
+    ]
   },
   {
     "id": "debug_cmd_sent",
@@ -844,8 +838,7 @@
     "y": 920,
     "wires": [
       [
-        "mqtt_out_fan_downlink",
-        "debug_cmd_sent"
+        "fn_command_dispatcher"
       ]
     ]
   },
@@ -873,8 +866,7 @@
     "y": 970,
     "wires": [
       [
-        "mqtt_out_fan_downlink",
-        "debug_cmd_sent"
+        "fn_command_dispatcher"
       ]
     ]
   },
@@ -902,8 +894,7 @@
     "y": 1020,
     "wires": [
       [
-        "mqtt_out_buzzer_downlink",
-        "debug_cmd_sent"
+        "fn_command_dispatcher"
       ]
     ]
   },
@@ -931,8 +922,7 @@
     "y": 1070,
     "wires": [
       [
-        "mqtt_out_buzzer_downlink",
-        "debug_cmd_sent"
+        "fn_command_dispatcher"
       ]
     ]
   }

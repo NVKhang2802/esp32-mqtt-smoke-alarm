@@ -18,49 +18,55 @@
 // ============================================================================
 // GLOBAL STATE & SYSTEM CONTEXT
 // ============================================================================
-static SensorConfig       g_cfg = {
-  .vccSensor      = 5.0f,
-  .rlKOhm         = 10.0f,
-  .curveA         = 1.0f,
-  .curveB         = 1.0f,
-  .alarmThreshold = DEFAULT_ALARM_PPM_DAY,
-  .safeThreshold  = DEFAULT_SAFE_PPM_DAY,
-  .calibPoint1    = 200.0f,
-  .calibPoint2    = 1000.0f,
-  .intervalMQ2    = SENSOR_POLL_INTERVAL_MS,
-  .intervalDHT    = DHT_POLL_INTERVAL_MS
+static SensorConfig g_cfg = {
+  5.0f,     // vccSensor
+  10.0f,    // rlKOhm
+  1.0f,     // curveA
+  1.0f,     // curveB
+  200.0f,   // calibPoint1
+  1000.0f   // calibPoint2
 };
 
-static FsmContext          g_fsm;
-static SensorHealthStatus  g_health = { false, false, "NONE" };
+static Thresholds   g_th  = makeThresholds(DEFAULT_ALARM_PPM_DAY);
+static FsmContext   g_fsm = {};
+static FsmInput     g_in  = {};
+static FsmOutput    g_out = {};
+static EmaFilter    g_ema = {};
+static Mq2Health    g_mq2h = {};
+static DhtHealth    g_dhth = {};
 
-static float         g_r0          = 10.0f;
-static float         g_currentPPM  = 0.0f;
-static float         g_currentTemp = 28.0f;
-static float         g_currentHum  = 65.0f;
-static unsigned long g_cycleCount  = 0;
+static float        g_r0          = 10.0f;
+static float        g_ppm         = 0.0f;
+static float        g_temp        = 28.0f;
+static float        g_hum         = 65.0f;
+static uint32_t     g_cycleCount  = 0;
 
 // Simulation flags for fault injection sandbox
-static bool g_simFaultMQ2      = false;
-static bool g_simFaultDHT      = false;
-static bool g_simFaultActuator = false;
+static bool g_simMq2 = false;
+static bool g_simDht = false;
 
 // Session & Client Identity
-static char g_sessionKey[36] = "SK_SESSION_DEFAULT_N04";
+static char g_sessionKey[40] = "SK_SESSION_DEFAULT_N04";
 static char g_clientId[40]   = "";
 static char g_macAddress[20] = "";
 
 // Timers
-static unsigned long g_lastMQ2Time       = 0;
-static unsigned long g_lastDHTTime       = 0;
-static unsigned long g_lastKeepAliveTime = 0;
-static unsigned long g_lastWifiRetry     = 0;
-static unsigned long g_lastMqttRetry     = 0;
+static uint32_t g_lastSample    = 0;
+static uint32_t g_lastDht       = 0;
+static uint32_t g_lastHeartbeat = 0;
+
+// Network backoff & non-blocking state
+static uint32_t s_wifiBackoff = 1000;
+static uint32_t s_mqttBackoff = 1000;
+static uint32_t s_wifiEnd     = 0;
+static uint32_t s_wifiBegin   = 0;
+static uint32_t s_mqttTry     = 0;
+static bool     s_wifiBusy    = false;
 
 // Button debounce
-static bool          g_lastButtonState   = HIGH;
-static bool          g_stableButtonState = HIGH;
-static unsigned long g_lastDebounceTime  = 0;
+static bool     g_lastButtonState   = HIGH;
+static bool     g_stableButtonState = HIGH;
+static uint32_t g_lastDebounceTime  = 0;
 
 // Network clients
 static WiFiClient   g_espClient;
@@ -69,74 +75,139 @@ static PubSubClient g_mqttClient(g_espClient);
 // ============================================================================
 // FORWARD DECLARATIONS
 // ============================================================================
+static void recompute();
 static void publishTelemetry();
-static void publishAlarmEvent(float ppm, bool isCritical);
-static void publishStatusAck(const char* cmd, const char* result, const char* detail);
+static void publishAlarmEvent(bool isCritical);
 static void publishAuthRequest();
 static void publishKeepAlive();
 static void mqttCallback(char* topic, byte* payload, unsigned int length);
+static bool mqttConnect();
+static void netTick(uint32_t now);
+static void buttonTick(uint32_t now);
+
+// ============================================================================
+// COMMAND & ACK HELPERS
+// ============================================================================
+enum CmdType : uint8_t {
+  CMD_FAN,
+  CMD_BUZZER,
+  CMD_MODE,
+  CMD_SCHEDULER,
+  CMD_FAULT,
+  CMD_BUTTON,
+  CMD_SYSTEM
+};
+
+static const char* cmdName(CmdType c) {
+  switch (c) {
+    case CMD_FAN:       return "cmd_fan";
+    case CMD_BUZZER:    return "cmd_buzzer";
+    case CMD_MODE:      return "cmd_mode";
+    case CMD_SCHEDULER: return "cmd_scheduler";
+    case CMD_FAULT:     return "inject_fault";
+    case CMD_BUTTON:    return "button_press";
+    default:            return "system";
+  }
+}
+
+static const char* ackResultStr(AckResult r) {
+  switch (r) {
+    case ACK_ACCEPTED:       return "ACCEPTED";
+    case ACK_SAFETY_LOCK:    return "REJECTED_SAFETY_LOCK";
+    case ACK_LOCAL_SILENCE:  return "LOCAL_SILENCE_60S";
+    case ACK_BAD_PAYLOAD:    return "REJECTED_BAD_PAYLOAD";
+    case ACK_UNKNOWN_ACTION: return "REJECTED_UNKNOWN_ACTION";
+    default:                 return "UNKNOWN";
+  }
+}
+
+static void publishAck(CmdType cmd, AckResult res, const char* detail = "") {
+  if (!g_mqttClient.connected()) return;
+
+  char payload[256];
+  snprintf(payload, sizeof(payload),
+    "{\"device_id\":\"%s\",\"cmd\":\"%s\",\"result\":\"%s\",\"detail\":\"%s\",\"fan\":\"%s\",\"buzzer\":\"%s\",\"mode\":\"%s\",\"fsm_state\":\"%s\"}",
+    DEVICE_ID, cmdName(cmd), ackResultStr(res), detail,
+    g_out.fanOn ? "ON" : "OFF",
+    (g_out.buzzer != BUZZ_OFF) ? "ON" : "OFF",
+    g_fsm.manualMode ? "MANUAL" : "AUTO",
+    getFsmStateString(g_fsm.state)
+  );
+
+  g_mqttClient.publish(TOPIC_STATUS, payload);
+  g_mqttClient.publish(TOPIC_V2_STATUS, payload);
+  Serial.printf("  [MQTT STATUS] -> ACK %s: %s (%s)\r\n", cmdName(cmd), ackResultStr(res), detail);
+}
+
+static void recompute() {
+  g_in.nowMs = millis();
+  g_in.ppm = g_ppm;
+  g_in.mq2Fault = g_mq2h.fault;
+  g_in.dhtFault = g_dhth.fault;
+  g_out = fsmStep(g_fsm, g_in, g_th);
+  fanApply(g_out.fanOn);
+  buzzerTick(g_out.buzzer, g_in.nowMs);
+}
 
 // ============================================================================
 // UPLINK MESSAGING HELPERS
 // ============================================================================
 static void publishTelemetry() {
-  if (!g_mqttClient.connected()) return;
+  char ppmStr[16];
+  if (g_mq2h.fault) {
+    strcpy(ppmStr, "null");
+  } else {
+    snprintf(ppmStr, sizeof(ppmStr), "%.1f", g_ppm);
+  }
 
-  char payload[256];
+  char payload[384];
   snprintf(payload, sizeof(payload),
-    "{\"device_id\":\"ESP32_Smoke_Nhom04\",\"uptime_s\":%lu,\"mq2_ppm\":%.1f,\"temp\":%.1f,\"hum\":%.1f,\"fan\":\"%s\",\"buzzer\":\"%s\",\"mode\":\"%s\",\"fsm_state\":\"%s\"}",
+    "{\"device_id\":\"%s\",\"uptime_s\":%lu,\"mq2_ppm\":%s,\"mq2_valid\":%s,\"temp\":%.1f,\"hum\":%.1f,\"dht_valid\":%s,\"fan\":\"%s\",\"buzzer\":\"%s\",\"buzzer_muted\":%s,\"mode\":\"%s\",\"fsm_state\":\"%s\",\"alarm_th\":%.1f,\"safe_th\":%.1f}",
+    DEVICE_ID,
     millis() / 1000,
-    g_currentPPM,
-    g_currentTemp,
-    g_currentHum,
-    g_fsm.fanState ? "ON" : "OFF",
-    g_fsm.isBuzzerActive ? "ON" : "OFF",
-    (g_fsm.mode == MODE_AUTO) ? "AUTO" : "MANUAL",
-    getFsmStateString(g_fsm.currentState)
+    ppmStr,
+    g_mq2h.fault ? "false" : "true",
+    g_temp,
+    g_hum,
+    g_dhth.fault ? "false" : "true",
+    g_out.fanOn ? "ON" : "OFF",
+    (g_out.buzzer != BUZZ_OFF) ? "ON" : "OFF",
+    g_out.buzzerMuted ? "true" : "false",
+    g_fsm.manualMode ? "MANUAL" : "AUTO",
+    getFsmStateString(g_fsm.state),
+    g_th.alarm,
+    g_th.safe
   );
 
-  g_mqttClient.publish(TOPIC_TELEMETRY, payload);
-  g_mqttClient.publish(TOPIC_V2_TELEMETRY, payload);
-  Serial.println(F("  [MQTT UPLINK] -> smoke/telemetry (QoS 0) [OK]"));
+  if (g_mqttClient.connected()) {
+    g_mqttClient.publish(TOPIC_TELEMETRY, payload);
+    g_mqttClient.publish(TOPIC_V2_TELEMETRY, payload);
+  } else {
+    pushOfflineRecord(g_mq2h.fault ? 0.0f : g_ppm, g_temp, g_hum, g_out.fanOn, (g_out.buzzer != BUZZ_OFF), getFsmStateString(g_fsm.state), "TELEMETRY");
+  }
 }
 
-static void publishAlarmEvent(float ppm, bool isCritical) {
-  if (!g_mqttClient.connected()) return;
-
+static void publishAlarmEvent(bool isCritical) {
   char payload[256];
   if (isCritical) {
     snprintf(payload, sizeof(payload),
-      "{\"device_id\":\"ESP32_Smoke_Nhom04\",\"event\":\"SMOKE_ALERT\",\"severity\":\"CRITICAL\",\"ppm\":%.1f,\"threshold\":%.1f,\"msg\":\"CANH BAO: Khoi vuot nguong! Coi va Quat da bat!\"}",
-      ppm, g_cfg.alarmThreshold
+      "{\"device_id\":\"%s\",\"uptime_s\":%lu,\"event\":\"SMOKE_ALERT\",\"severity\":\"CRITICAL\",\"ppm\":%.1f,\"threshold\":%.1f,\"msg\":\"CANH BAO: Khoi vuot nguong! Coi va Quat da bat!\"}",
+      DEVICE_ID, millis() / 1000, g_ppm, g_th.alarm
     );
   } else {
     snprintf(payload, sizeof(payload),
-      "{\"device_id\":\"ESP32_Smoke_Nhom04\",\"event\":\"SMOKE_SAFE\",\"severity\":\"NORMAL\",\"ppm\":%.1f,\"msg\":\"AN TOAN: Nong do khoi da ve muc an toan. Bat dau Purge 30s.\"}",
-      ppm
+      "{\"device_id\":\"%s\",\"uptime_s\":%lu,\"event\":\"SMOKE_SAFE\",\"severity\":\"NORMAL\",\"ppm\":%.1f,\"threshold\":%.1f,\"msg\":\"AN TOAN: Nong do khoi da ve muc an toan. Bat dau Purge 30s.\"}",
+      DEVICE_ID, millis() / 1000, g_ppm, g_th.safe
     );
   }
 
-  g_mqttClient.publish(TOPIC_EVENT_ALARM, payload);
-  g_mqttClient.publish(TOPIC_V2_ALARM, payload);
-  Serial.println(F("  [MQTT EVENT]  -> smoke/event/alarm (CRITICAL ALARM) [SENT]"));
-}
-
-static void publishStatusAck(const char* cmd, const char* result, const char* detail) {
-  if (!g_mqttClient.connected()) return;
-
-  char payload[256];
-  snprintf(payload, sizeof(payload),
-    "{\"device_id\":\"ESP32_Smoke_Nhom04\",\"cmd\":\"%s\",\"result\":\"%s\",\"detail\":\"%s\",\"fan\":\"%s\",\"mode\":\"%s\"}",
-    cmd, result, detail,
-    g_fsm.fanState ? "ON" : "OFF",
-    (g_fsm.mode == MODE_AUTO) ? "AUTO" : "MANUAL"
-  );
-
-  g_mqttClient.publish(TOPIC_STATUS, payload);
-  g_mqttClient.publish(TOPIC_V2_STATUS, payload);
-  Serial.print(F("  [MQTT STATUS] -> smoke/status (ACK: "));
-  Serial.print(result);
-  Serial.println(F(") [SENT]"));
+  if (g_mqttClient.connected()) {
+    g_mqttClient.publish(TOPIC_EVENT_ALARM, payload);
+    g_mqttClient.publish(TOPIC_V2_ALARM, payload);
+  } else {
+    pushOfflineRecord(g_ppm, g_temp, g_hum, g_out.fanOn, (g_out.buzzer != BUZZ_OFF), getFsmStateString(g_fsm.state), "ALARM_EVENT");
+  }
+  Serial.printf("  [MQTT EVENT] -> ALARM %s (PPM: %.1f)\r\n", isCritical ? "CRITICAL" : "SAFE", g_ppm);
 }
 
 static void publishAuthRequest() {
@@ -146,185 +217,183 @@ static void publishAuthRequest() {
   snprintf(payload, sizeof(payload),
     "{\"msg_id\":\"REQ-AUTH-%04lu\",\"device_id\":\"%s\",\"mac_address\":\"%s\",\"secret_token\":\"HUIT_IOT_SECURE_TOKEN_N04\",\"timestamp\":%lu}",
     millis() / 1000,
-    g_clientId,
+    DEVICE_ID,
     g_macAddress,
     millis() / 1000
   );
 
   g_mqttClient.publish(TOPIC_V2_AUTH_REQ, payload, 1);
-  Serial.print(F("  [MQTT AUTH REQ] -> "));
-  Serial.print(TOPIC_V2_AUTH_REQ);
-  Serial.println(F(" [SENT]"));
+  Serial.println(F("  [MQTT AUTH REQ] -> Sent Auth Request"));
 }
 
 static void publishKeepAlive() {
   if (!g_mqttClient.connected()) return;
 
+  const char* statusStr = (g_fsm.state == STATE_FAULT || g_mq2h.fault) ? "FAULT" : (g_dhth.fault ? "DEGRADED" : "HEALTHY");
   char payload[256];
   snprintf(payload, sizeof(payload),
-    "{\"session_key\":\"%s\",\"device_id\":\"%s\",\"uptime_sec\":%lu,\"free_heap_bytes\":%u,\"wifi_rssi_dbm\":%d,\"status\":\"%s\",\"fsm_state\":\"%s\"}",
+    "{\"session_key\":\"%s\",\"device_id\":\"%s\",\"uptime_s\":%lu,\"uptime_sec\":%lu,\"free_heap_bytes\":%u,\"wifi_rssi_dbm\":%d,\"status\":\"%s\",\"fsm_state\":\"%s\"}",
     g_sessionKey,
-    g_clientId,
+    DEVICE_ID,
+    millis() / 1000,
     millis() / 1000,
     ESP.getFreeHeap(),
     WiFi.RSSI(),
-    (g_fsm.currentState == STATE_FAULT) ? "FAULT" : "HEALTHY",
-    getFsmStateString(g_fsm.currentState)
+    statusStr,
+    getFsmStateString(g_fsm.state)
   );
 
   g_mqttClient.publish(TOPIC_KEEP_ALIVE_V1, payload);
   g_mqttClient.publish(TOPIC_V2_KEEP_ALIVE, payload);
-  Serial.print(F("  [MQTT HEARTBEAT] -> Alive (Heap: "));
-  Serial.print(ESP.getFreeHeap());
-  Serial.println(F(" bytes) [SENT]"));
 }
 
 // ============================================================================
-// DOWNLINK COMMAND HANDLERS (CLEAN SRP)
+// DOWNLINK COMMAND HANDLERS
 // ============================================================================
-static void handleAuthResponse(const char* message) {
+static bool is(const char* a, const char* v) { return a && strcasecmp(a, v) == 0; }
+
+static void onAuthResponse(const char* topic, const char* message) {
+  if (strstr(topic, DEVICE_ID) == nullptr) return;
+
   JsonDocument doc;
   if (deserializeJson(doc, message)) return;
 
   const char* status = doc["status"] | "REJECTED";
-  if (strcmp(status, "PASS") == 0) {
+  if (is(status, "PASS")) {
     const char* sk = doc["session_key"] | "SK_AUTHORIZED_N04";
     strncpy(g_sessionKey, sk, sizeof(g_sessionKey) - 1);
     g_sessionKey[sizeof(g_sessionKey) - 1] = '\0';
-    Serial.println(F("Ket qua : [AUTH PASS] Server chap thuan thiet bi!"));
+    Serial.println(F("  [AUTH PASS] Server accepted device"));
 
-    if (doc["config"]["alarm_threshold_ppm"]) {
-      g_cfg.alarmThreshold = doc["config"]["alarm_threshold_ppm"];
-      Serial.print(F("Dong bo : Nguong bao dong tu Server = "));
-      Serial.print(g_cfg.alarmThreshold, 1);
-      Serial.println(F(" PPM"));
+    if (doc["config"]["alarm_threshold_ppm"].is<float>()) {
+      float reqTh = doc["config"]["alarm_threshold_ppm"].as<float>();
+      g_th = makeThresholds(reqTh);
+      Serial.printf("  [AUTH CONFIG] Synced alarm threshold: %.1f PPM (Safe: %.1f PPM)\r\n", g_th.alarm, g_th.safe);
+    }
+    publishAck(CMD_SYSTEM, ACK_ACCEPTED, "AUTH_PASS");
+  } else {
+    Serial.println(F("  [AUTH REJECTED] Server rejected authentication"));
+  }
+}
+
+static void onFan(const char* message) {
+  JsonDocument doc;
+  if (deserializeJson(doc, message)) {
+    publishAck(CMD_FAN, ACK_BAD_PAYLOAD, "JSON_PARSE_ERROR");
+    return;
+  }
+
+  const char* action = doc["action"] | doc["cmd"] | "";
+  if (is(action, "OFF")) {
+    CmdResult cr = cmdRemoteFanOff(g_fsm);
+    publishAck(CMD_FAN, cr == CMD_OK ? ACK_ACCEPTED : ACK_SAFETY_LOCK, cr == CMD_OK ? "FAN_OFF" : "PPM_ABOVE_THRESHOLD");
+  } else if (is(action, "ON")) {
+    cmdRemoteFanOn(g_fsm);
+    publishAck(CMD_FAN, ACK_ACCEPTED, "FAN_ON");
+  } else if (is(action, "AUTO")) {
+    cmdFanAuto(g_fsm);
+    publishAck(CMD_FAN, ACK_ACCEPTED, "MODE_AUTO");
+  } else {
+    publishAck(CMD_FAN, ACK_UNKNOWN_ACTION, "UNKNOWN_ACTION");
+  }
+  recompute();
+}
+
+static void onBuzzer(const char* message) {
+  JsonDocument doc;
+  if (deserializeJson(doc, message)) {
+    publishAck(CMD_BUZZER, ACK_BAD_PAYLOAD, "JSON_PARSE_ERROR");
+    return;
+  }
+
+  const char* action = doc["action"] | doc["cmd"] | "";
+  if (is(action, "MUTE") || is(action, "OFF")) {
+    CmdResult cr = cmdRemoteMute(g_fsm, millis());
+    publishAck(CMD_BUZZER, cr == CMD_OK ? ACK_ACCEPTED : ACK_SAFETY_LOCK, cr == CMD_OK ? "MUTED_180S" : "ALARM_LATCHED");
+  } else if (is(action, "UNMUTE")) {
+    cmdRemoteUnmute(g_fsm);
+    publishAck(CMD_BUZZER, ACK_ACCEPTED, "UNMUTED");
+  } else if (is(action, "TEST") || is(action, "ON")) {
+    CmdResult cr = cmdBuzzerTest(g_fsm);
+    if (cr == CMD_OK) {
+      buzzerTest(millis());
+      publishAck(CMD_BUZZER, ACK_ACCEPTED, "TEST_500MS");
+    } else {
+      publishAck(CMD_BUZZER, ACK_SAFETY_LOCK, "ALARM_LATCHED");
     }
   } else {
-    Serial.println(F("Ket qua : [AUTH REJECTED] Server tu choi xac thuc thiet bi!"));
+    publishAck(CMD_BUZZER, ACK_UNKNOWN_ACTION, "UNKNOWN_ACTION");
   }
+  recompute();
 }
 
-static void handleFanCommand(const char* message) {
-  if (strstr(message, "OFF") != nullptr) {
-    if (g_currentPPM >= g_cfg.alarmThreshold) {
-      Serial.println(F("Ket qua : TU CHOI! [PCCC Interlock] Khoi dang nguy hiem, duy tri quat!"));
-      publishStatusAck("cmd_fan_off", "REJECTED_SAFETY_LOCK", "PPM >= Threshold");
-      return;
-    }
-    g_fsm.manualFanState = false;
-    g_fsm.mode = MODE_MANUAL;
-    setActuatorFan(g_fsm, false);
-    Serial.println(F("Ket qua : CHAP NHAN -> TAT QUAT (MODE_MANUAL)"));
-    publishStatusAck("cmd_fan_off", "ACCEPTED", "FAN_IS_OFF");
-    return;
-  }
-
-  if (strstr(message, "ON") != nullptr) {
-    g_fsm.manualFanState = true;
-    g_fsm.mode = MODE_MANUAL;
-    setActuatorFan(g_fsm, true);
-    Serial.println(F("Ket qua : CHAP NHAN -> BAT QUAT (MODE_MANUAL)"));
-    publishStatusAck("cmd_fan_on", "ACCEPTED", "FAN_IS_ON");
-    return;
-  }
-
-  if (strstr(message, "AUTO") != nullptr) {
-    g_fsm.mode = MODE_AUTO;
-    Serial.println(F("Ket qua : CHAP NHAN -> Chuyen ve TU DONG (MODE_AUTO)"));
-    if (g_currentPPM >= g_cfg.alarmThreshold) setActuatorFan(g_fsm, true);
-    else if (g_currentPPM <= g_cfg.safeThreshold) setActuatorFan(g_fsm, false);
-    publishStatusAck("cmd_fan_auto", "ACCEPTED", "MODE_AUTO_ACTIVE");
-  }
-}
-
-static void handleBuzzerCommand(const char* message) {
-  if (strstr(message, "UNMUTE") != nullptr) {
-    g_fsm.isMuted = false;
-    if (g_fsm.autoOverrideActive) setActuatorBuzzer(g_fsm, true);
-    Serial.println(F("Ket qua : CHAP NHAN -> Da huy Mute coi"));
-    publishStatusAck("cmd_buzzer_unmute", "ACCEPTED", "UNMUTED");
-    return;
-  }
-
-  if (strstr(message, "MUTE") != nullptr || strstr(message, "OFF") != nullptr) {
-    g_fsm.isMuted = true;
-    g_fsm.muteStartTime = millis();
-    g_fsm.muteDurationMs = MUTE_DURATION_MS;
-    setActuatorBuzzer(g_fsm, false);
-    Serial.println(F("Ket qua : CHAP NHAN -> Da MUTE/TAT coi trong 180s"));
-    publishStatusAck("cmd_buzzer_mute", "ACCEPTED", "MUTED_FOR_180S");
-    return;
-  }
-
-  if (strstr(message, "TEST") != nullptr || strstr(message, "ON") != nullptr) {
-    Serial.println(F("Ket qua : CHAP NHAN -> Kiem tra coi bao (Test Beep 0.5s)"));
-    ledcWriteTone(BUZZER_LEDC_CH, BUZZER_TONE_TEST_HZ);
-    ledcWrite(BUZZER_LEDC_CH, BUZZER_DUTY_50PCT);
-    delay(500);
-    ledcWrite(BUZZER_LEDC_CH, BUZZER_DUTY_OFF);
-    ledcWriteTone(BUZZER_LEDC_CH, 0);
-    publishStatusAck("cmd_buzzer_test", "ACCEPTED", "BEEP_TESTED");
-  }
-}
-
-static void handleModeCommand(const char* message) {
-  if (strstr(message, "MANUAL") != nullptr) {
-    g_fsm.mode = MODE_MANUAL;
-    Serial.println(F("Ket qua : CHAP NHAN -> MODE_MANUAL"));
-    publishStatusAck("cmd_mode", "ACCEPTED", "MANUAL");
-  } else {
-    g_fsm.mode = MODE_AUTO;
-    Serial.println(F("Ket qua : CHAP NHAN -> MODE_AUTO"));
-    publishStatusAck("cmd_mode", "ACCEPTED", "AUTO");
-  }
-}
-
-static void handleFaultInjection(const char* message) {
+static void onMode(const char* message) {
   JsonDocument doc;
-  if (deserializeJson(doc, message)) return;
-
-  const char* faultType = doc["fault"] | "";
-  Serial.print(F("Ket qua : [FAULT INJECTION] Kich hoat kieu: "));
-  Serial.println(faultType);
-
-  if (strcasecmp(faultType, "MQ2_DISCONNECT") == 0) {
-    g_simFaultMQ2 = true;
-    checkSensorHealth(g_currentTemp, g_currentHum, g_simFaultMQ2, g_simFaultDHT, g_health, g_fsm.currentState);
-  } else if (strcasecmp(faultType, "DHT_NAN") == 0) {
-    g_simFaultDHT = true;
-    checkSensorHealth(g_currentTemp, g_currentHum, g_simFaultMQ2, g_simFaultDHT, g_health, g_fsm.currentState);
-  } else if (strcasecmp(faultType, "ACTUATOR_FAULT") == 0) {
-    g_simFaultActuator = true;
-    publishStatusAck("actuator_check", "ACTUATOR_FAULT", "RELAY_RESPONSE_TIMEOUT");
-  } else if (strcasecmp(faultType, "CLEAR") == 0 || strcasecmp(faultType, "RESTORE") == 0) {
-    g_simFaultMQ2 = false;
-    g_simFaultDHT = false;
-    g_simFaultActuator = false;
-    g_health.mq2Fault = false;
-    g_health.dhtFault = false;
-    strncpy(g_health.faultCode, "NONE", sizeof(g_health.faultCode));
-    g_fsm.currentState = STATE_SAFE;
-    Serial.println(F("Ket qua : [FAULT CLEAR] Da xoa moi su co mo phong, he thong ve SAFE"));
-    publishStatusAck("fault_clear", "ACCEPTED", "SYSTEM_HEALTHY");
+  if (deserializeJson(doc, message)) {
+    publishAck(CMD_MODE, ACK_BAD_PAYLOAD, "JSON_PARSE_ERROR");
+    return;
   }
+
+  const char* modeStr = doc["mode"] | doc["action"] | "";
+  if (is(modeStr, "MANUAL")) {
+    g_fsm.manualMode = true;
+    publishAck(CMD_MODE, ACK_ACCEPTED, "MANUAL_MODE");
+  } else if (is(modeStr, "AUTO")) {
+    g_fsm.manualMode = false;
+    publishAck(CMD_MODE, ACK_ACCEPTED, "AUTO_MODE");
+  } else {
+    publishAck(CMD_MODE, ACK_UNKNOWN_ACTION, "UNKNOWN_MODE");
+  }
+  recompute();
 }
 
-static void handleSchedulerCommand(const char* message) {
+static void onScheduler(const char* message) {
   JsonDocument doc;
-  if (deserializeJson(doc, message)) return;
-
-  const char* schedMode = doc["mode"] | "DAY";
-  if (strcasecmp(schedMode, "NIGHT") == 0) {
-    g_cfg.alarmThreshold = ALARM_PPM_NIGHT;
-    g_cfg.safeThreshold  = SAFE_PPM_NIGHT;
-    Serial.println(F("Ket qua : [SCHEDULER] Kich hoat CHE DO BAN DEM (Alarm: 350, Safe: 250 PPM)"));
-    publishStatusAck("cmd_scheduler", "ACCEPTED", "NIGHT_MODE_ACTIVE_350PPM");
-  } else {
-    g_cfg.alarmThreshold = DEFAULT_ALARM_PPM_DAY;
-    g_cfg.safeThreshold  = DEFAULT_SAFE_PPM_DAY;
-    Serial.println(F("Ket qua : [SCHEDULER] Kich hoat CHE DO BAN NGAY (Alarm: 400, Safe: 300 PPM)"));
-    publishStatusAck("cmd_scheduler", "ACCEPTED", "DAY_MODE_ACTIVE_400PPM");
+  if (deserializeJson(doc, message)) {
+    publishAck(CMD_SCHEDULER, ACK_BAD_PAYLOAD, "JSON_PARSE_ERROR");
+    return;
   }
+
+  const char* mode = doc["mode"] | "";
+  if (is(mode, "NIGHT")) {
+    g_th = makeThresholds(ALARM_PPM_NIGHT);
+    publishAck(CMD_SCHEDULER, ACK_ACCEPTED, "NIGHT_MODE_350PPM");
+  } else if (is(mode, "DAY")) {
+    g_th = makeThresholds(DEFAULT_ALARM_PPM_DAY);
+    publishAck(CMD_SCHEDULER, ACK_ACCEPTED, "DAY_MODE_400PPM");
+  } else {
+    publishAck(CMD_SCHEDULER, ACK_UNKNOWN_ACTION, "UNKNOWN_SCHEDULER_MODE");
+  }
+  recompute();
+}
+
+static void onFaultInjection(const char* message) {
+  JsonDocument doc;
+  if (deserializeJson(doc, message)) {
+    publishAck(CMD_FAULT, ACK_BAD_PAYLOAD, "JSON_PARSE_ERROR");
+    return;
+  }
+
+  const char* type = doc["type"] | doc["fault"] | "";
+  if (is(type, "MQ2_DISCONNECT")) {
+    g_simMq2 = true;
+    mq2Update(g_mq2h, 0, g_simMq2, MQ2_ENTER_N, MQ2_EXIT_N);
+    publishAck(CMD_FAULT, ACK_ACCEPTED, "MQ2_DISCONNECT_INJECTED");
+  } else if (is(type, "DHT_NAN") || is(type, "DHT_TIMEOUT")) {
+    g_simDht = true;
+    dhtOnRead(g_dhth, false, g_temp, g_simDht);
+    publishAck(CMD_FAULT, ACK_ACCEPTED, "DHT_FAULT_INJECTED");
+  } else if (is(type, "CLEAR") || is(type, "RESTORE") || is(type, "NONE")) {
+    g_simMq2 = false;
+    g_simDht = false;
+    g_mq2h = {};
+    g_dhth = {};
+    emaReset(g_ema, g_ppm > 0.0f ? g_ppm : 200.0f);
+    publishAck(CMD_FAULT, ACK_ACCEPTED, "ALL_FAULTS_CLEARED");
+  } else {
+    publishAck(CMD_FAULT, ACK_UNKNOWN_ACTION, "REJECTED_UNKNOWN_FAULT");
+  }
+  recompute();
 }
 
 static void mqttCallback(char* topic, byte* payload, unsigned int length) {
@@ -340,17 +409,17 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
   Serial.print(F("Payload : ")); Serial.println(message);
 
   if (strstr(topic, "/auth/response") != nullptr) {
-    handleAuthResponse(message);
+    onAuthResponse(topic, message);
   } else if (strcmp(topic, TOPIC_CMD_FAN) == 0 || strstr(topic, "/cmd/fan") != nullptr) {
-    handleFanCommand(message);
+    onFan(message);
   } else if (strcmp(topic, TOPIC_CMD_BUZZER) == 0 || strstr(topic, "/cmd/buzzer") != nullptr) {
-    handleBuzzerCommand(message);
+    onBuzzer(message);
   } else if (strcmp(topic, TOPIC_CMD_MODE) == 0 || strstr(topic, "/cmd/mode") != nullptr) {
-    handleModeCommand(message);
+    onMode(message);
   } else if (strcmp(topic, TOPIC_CMD_INJECT_FAULT) == 0 || strstr(topic, "/inject_fault") != nullptr) {
-    handleFaultInjection(message);
+    onFaultInjection(message);
   } else if (strcmp(topic, TOPIC_CMD_SCHEDULER) == 0 || strstr(topic, "/scheduler") != nullptr) {
-    handleSchedulerCommand(message);
+    onScheduler(message);
   }
 
   Serial.println(F("================================================================\r\n"));
@@ -359,76 +428,81 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
 // ============================================================================
 // HARDWARE PERIPHERALS & NETWORK ORCHESTRATION
 // ============================================================================
-static void handleManualButton() {
+static void buttonTick(uint32_t now) {
   const bool reading = digitalRead(PIN_BUTTON);
   if (reading != g_lastButtonState) {
-    g_lastDebounceTime = millis();
+    g_lastDebounceTime = now;
   }
 
-  if ((millis() - g_lastDebounceTime) > DEBOUNCE_DELAY_MS) {
+  if ((now - g_lastDebounceTime) > DEBOUNCE_DELAY_MS) {
     if (reading != g_stableButtonState) {
       g_stableButtonState = reading;
       if (g_stableButtonState == LOW) {
-        if (g_fsm.autoOverrideActive) {
-          Serial.println(F("\r\n[BUTTON] >>> BI KHOA! Dang bao dong khoi (PPM >= Nguong), khong the tat quat!"));
-          publishStatusAck("button_press", "REJECTED_SAFETY_LOCK", "Danger PPM");
-        } else {
-          g_fsm.manualFanState = !g_fsm.manualFanState;
-          g_fsm.mode = MODE_MANUAL;
-          setActuatorFan(g_fsm, g_fsm.manualFanState);
-          Serial.print(F("\r\n[BUTTON] >>> Cong tac thu cong: Quat "));
-          Serial.println(g_fsm.manualFanState ? F("BAT") : F("TAT"));
-          publishStatusAck("button_press", "ACCEPTED", g_fsm.manualFanState ? "FAN_ON" : "FAN_OFF");
-        }
+        bool silenced = cmdLocalButton(g_fsm, now);
+        publishAck(CMD_BUTTON, silenced ? ACK_LOCAL_SILENCE : ACK_ACCEPTED, silenced ? "LOCAL_SILENCE_60S" : (g_fsm.manualFan ? "FAN_ON" : "FAN_OFF"));
+        recompute();
       }
     }
   }
   g_lastButtonState = reading;
 }
 
-static void maintainNetworkConnection() {
-  const unsigned long now = millis();
+static bool mqttConnect() {
+  Serial.print(F("[MQTT] Connecting to Broker "));
+  Serial.println(MQTT_BROKER);
 
-  // 1. Maintain WiFi
+  g_mqttClient.setSocketTimeout(2);
+
+  const char* lwtMsg = "{\"device_id\":\"ESP32_SMOKE_N04_A01\",\"status\":\"offline\",\"eventType\":\"LWT\"}";
+  if (g_mqttClient.connect(g_clientId, TOPIC_LWT, 1, true, lwtMsg)) {
+    Serial.println(F("[MQTT] >>> CONNECTED SUCCESSFULLY! <<<"));
+
+    const char* onlineMsg = "{\"device_id\":\"ESP32_SMOKE_N04_A01\",\"status\":\"online\"}";
+    g_mqttClient.publish(TOPIC_LWT, onlineMsg, true);
+
+    g_mqttClient.subscribe("Nhom09/smoke/cmd/#", 1);
+    g_mqttClient.subscribe(TOPIC_V2_AUTH_RESP, 1);
+    g_mqttClient.subscribe("Nhom09/smoke/v2/+/+/+/+/cmd/#", 1);
+
+    publishAck(CMD_SYSTEM, ACK_ACCEPTED, "ONLINE_READY");
+    publishAuthRequest();
+    flushOfflineBuffer(g_mqttClient, TOPIC_OFFLINE_SYNC, 5);
+    return true;
+  } else {
+    Serial.printf("[MQTT] Connection failed, rc=%d\r\n", g_mqttClient.state());
+    return false;
+  }
+}
+
+static void netTick(uint32_t now) {
   if (WiFi.status() != WL_CONNECTED) {
-    if (now - g_lastWifiRetry >= RECONNECT_INTERVAL_MS) {
-      g_lastWifiRetry = now;
-      Serial.println(F("[WIFI] Dang ket noi lai WiFi Wokwi-GUEST..."));
-      WiFi.begin(WIFI_SSID, WIFI_PASS);
+    if (!s_wifiBusy) {
+      if (now - s_wifiEnd >= s_wifiBackoff) {
+        WiFi.disconnect();
+        WiFi.begin(WIFI_SSID, WIFI_PASS);
+        s_wifiBusy = true;
+        s_wifiBegin = now;
+      }
+    } else if (now - s_wifiBegin >= WIFI_ATTEMPT_TIMEOUT_MS) {
+      s_wifiBusy = false;
+      s_wifiEnd = now;
+      s_wifiBackoff = nextBackoff(s_wifiBackoff, 16000);
     }
     return;
   }
 
-  // 2. Maintain MQTT
-  if (!g_mqttClient.connected()) {
-    if (now - g_lastMqttRetry >= RECONNECT_INTERVAL_MS) {
-      g_lastMqttRetry = now;
-      Serial.print(F("[MQTT] Dang ket noi Broker "));
-      Serial.println(MQTT_BROKER);
+  s_wifiBusy = false;
+  s_wifiBackoff = 1000;
 
-      const char* lwtMsg = "{\"device_id\":\"ESP32_Smoke_Nhom04\",\"status\":\"offline\"}";
-      if (g_mqttClient.connect(g_clientId, TOPIC_LWT, 1, true, lwtMsg)) {
-        Serial.println(F("[MQTT] >>> KET NOI BROKER THANH CONG! <<<"));
-
-        const char* onlineMsg = "{\"device_id\":\"ESP32_Smoke_Nhom04\",\"status\":\"online\"}";
-        g_mqttClient.publish(TOPIC_LWT, onlineMsg, true);
-
-        g_mqttClient.subscribe("Nhom09/smoke/cmd/#", 1);
-        g_mqttClient.subscribe(TOPIC_V2_AUTH_RESP, 1);
-        g_mqttClient.subscribe("Nhom09/smoke/v2/+/+/+/+/cmd/#", 1);
-        Serial.println(F("[MQTT] Da dang ky LWT va Subscribe topics (QoS 1)\r\n"));
-
-        publishStatusAck("system_online", "READY", "IP_ACQUIRED");
-        publishAuthRequest();
-        flushOfflineBuffer(g_mqttClient, TOPIC_OFFLINE_SYNC);
-      } else {
-        Serial.print(F("[MQTT] Ket noi that bai, rc="));
-        Serial.print(g_mqttClient.state());
-        Serial.println(F(". Thu lai sau 5s..."));
-      }
-    }
-  } else {
+  if (g_mqttClient.connected()) {
     g_mqttClient.loop();
+    flushOfflineBuffer(g_mqttClient, TOPIC_OFFLINE_SYNC, 5);
+    return;
+  }
+
+  if (now - s_mqttTry >= s_mqttBackoff) {
+    s_mqttTry = now;
+    s_mqttBackoff = mqttConnect() ? 1000 : nextBackoff(s_mqttBackoff, 16000);
   }
 }
 
@@ -437,25 +511,25 @@ static void maintainNetworkConnection() {
 // ============================================================================
 void setup() {
   Serial.begin(115200);
-  delay(500);
+  delay(300);
 
   Serial.println(F("\r\n========================================================"));
-  Serial.println(F("  HE THONG BAO KHOI CANH BAO SOM - LEAN & CLEAN FIRMWARE"));
+  Serial.println(F("  HE THONG BAO KHOI CANH BAO SOM - FIRMWARE V5"));
   Serial.println(F("  Nhom 04 - Lop Lap trinh nhung IoT - GVHD: Vo Hoang Hai "));
   Serial.println(F("========================================================"));
 
   pinMode(PIN_BUTTON, INPUT_PULLUP);
 
-  initFsm(g_fsm);
+  initActuators();
   initSensors();
   initOfflineBuffer();
   calibrateMQ2(g_cfg, g_r0);
 
-  // Generate unique client ID & MAC string
+  // Generate unique client ID with random hex suffix
   snprintf(g_clientId, sizeof(g_clientId), "%s%04X", MQTT_CLIENT_PREFIX, (uint16_t)random(0xffff));
   strncpy(g_macAddress, WiFi.macAddress().c_str(), sizeof(g_macAddress) - 1);
   g_macAddress[sizeof(g_macAddress) - 1] = '\0';
-  Serial.print(F("[SETUP] Client ID: ")); Serial.println(g_clientId);
+  Serial.printf("[SETUP] Client ID: %s | MAC: %s\r\n", g_clientId, g_macAddress);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
@@ -464,73 +538,79 @@ void setup() {
   g_mqttClient.setCallback(mqttCallback);
   g_mqttClient.setBufferSize(512);
 
-  Serial.println(F("[SETUP] Khoi tao hoan tat. Bat dau giam sat & truyen thong.\r\n"));
+  recompute();
+  Serial.println(F("[SETUP] Initialization complete. Starting non-blocking loop.\r\n"));
 }
 
 void loop() {
-  const unsigned long now = millis();
+  const uint32_t now = millis();
 
-  // 1. Maintain Network connectivity (Non-blocking)
-  maintainNetworkConnection();
+  // 1. Maintain Network connectivity (Non-blocking decoupled backoff)
+  netTick(now);
 
-  // 2. Handle manual push button
-  handleManualButton();
+  // 2. Hardware push button
+  buttonTick(now);
 
-  // 3. Process mute buzzer timeout
-  checkMuteTimer(g_fsm);
+  // 3. Actuator updates (Edge-triggered LEDC tone)
+  buzzerTick(g_out.buzzer, now);
+  fanApply(g_out.fanOn);
 
-  // 4. Poll MQ-2 and evaluate FSM logic
-  if (now - g_lastMQ2Time >= g_cfg.intervalMQ2) {
-    g_lastMQ2Time = now;
+  // 4. Sample MQ-2 & step FSM every SAMPLE_MS (2000ms)
+  if (now - g_lastSample >= SAMPLE_MS) {
+    g_lastSample = now;
     g_cycleCount++;
-    g_currentPPM = readMQ2PPM(g_cfg, g_r0);
 
-    Serial.printf("[#%04lu | T=%3lus] PPM: %5.1f | Nhiet: %4.1f*C | Am: %4.1f%% | Quat: %3s | Coi: %3s | State: %s\r\n",
+    const SystemState prev = g_fsm.state;
+    const int adc = analogRead(PIN_MQ2);
+    const float rawPpm = readMQ2PPM(g_cfg, g_r0);
+
+    const HealthEvent ev = mq2Update(g_mq2h, adc, g_simMq2, MQ2_ENTER_N, MQ2_EXIT_N);
+    if (ev == HE_RECOVERED) {
+      emaReset(g_ema, rawPpm);
+    }
+    if (!g_mq2h.fault) {
+      g_ppm = emaUpdate(g_ema, rawPpm);
+    }
+
+    g_in = { g_ppm, g_mq2h.fault, g_dhth.fault, now };
+    g_out = fsmStep(g_fsm, g_in, g_th);
+
+    Serial.printf("[#%04lu | T=%3lus] PPM: %5.1f (raw: %5.1f) | Nhiet: %4.1f*C | Am: %4.1f%% | Quat: %3s | Coi: %3s | State: %s\r\n",
       g_cycleCount,
       now / 1000,
-      g_currentPPM,
-      g_currentTemp,
-      g_currentHum,
-      g_fsm.fanState ? "BAT" : "TAT",
-      g_fsm.isBuzzerActive ? "BAT" : "TAT",
-      getFsmStateString(g_fsm.currentState)
+      g_mq2h.fault ? 0.0f : g_ppm,
+      rawPpm,
+      g_temp,
+      g_hum,
+      g_out.fanOn ? "BAT" : "TAT",
+      (g_out.buzzer != BUZZ_OFF) ? "BAT" : "TAT",
+      getFsmStateString(g_fsm.state)
     );
 
-    // Diagnostics & Health Verification
-    checkSensorHealth(g_currentTemp, g_currentHum, g_simFaultMQ2, g_simFaultDHT, g_health, g_fsm.currentState);
-
-    // FSM State transitions & actuator actions
-    const SystemState prevState = g_fsm.currentState;
-    updateFsmLogic(g_fsm, g_currentPPM, g_cfg);
-
-    if (g_fsm.currentState == STATE_ALARM && prevState != STATE_ALARM) {
-      publishAlarmEvent(g_currentPPM, true);
-    } else if (g_fsm.currentState == STATE_COOLDOWN && prevState == STATE_ALARM) {
-      publishAlarmEvent(g_currentPPM, false);
+    if (g_fsm.state == STATE_ALARM && prev != STATE_ALARM) {
+      publishAlarmEvent(true);
+    } else if (g_fsm.state == STATE_COOLDOWN && prev == STATE_ALARM) {
+      publishAlarmEvent(false);
     }
 
-    // Offline buffer recording if disconnected
-    if (!g_mqttClient.connected()) {
-      pushOfflineRecord(g_currentPPM, g_currentTemp, g_currentHum, g_fsm.fanState, g_fsm.isBuzzerActive, getFsmStateString(g_fsm.currentState));
-    }
-
-    // Publish periodic telemetry
     publishTelemetry();
   }
 
-  // 5. Poll DHT22 temperature & humidity
-  if (now - g_lastDHTTime >= g_cfg.intervalDHT) {
-    g_lastDHTTime = now;
+  // 5. Poll DHT22 temperature & humidity (5000ms)
+  if (now - g_lastDht >= DHT_POLL_INTERVAL_MS) {
+    g_lastDht = now;
     float t = 0.0f, h = 0.0f;
-    if (readDHT(t, h)) {
-      g_currentTemp = t;
-      g_currentHum  = h;
+    const bool ok = readDHT(t, h);
+    dhtOnRead(g_dhth, ok, t, g_simDht);
+    if (ok && !g_dhth.fault) {
+      g_temp = t;
+      g_hum  = h;
     }
   }
 
-  // 6. Dispatch periodic Keep-Alive heartbeat (10s)
-  if (now - g_lastKeepAliveTime >= HEARTBEAT_INTERVAL_MS) {
-    g_lastKeepAliveTime = now;
+  // 6. Periodic Keep-Alive heartbeat (10s)
+  if (now - g_lastHeartbeat >= HEARTBEAT_INTERVAL_MS) {
+    g_lastHeartbeat = now;
     publishKeepAlive();
   }
 }

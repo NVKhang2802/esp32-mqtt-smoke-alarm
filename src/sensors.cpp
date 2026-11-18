@@ -57,7 +57,7 @@ void calibrateMQ2(SensorConfig& config, float& r0Out) {
 }
 
 float readMQ2PPM(const SensorConfig& config, float r0) {
-  const float rs = readAverageRs(10, 200, config);
+  const float rs = readAverageRs(ADC_SAMPLES, 200, config);
   float ratio = rs / r0;
   if (ratio <= 0.001f) ratio = 0.001f;
   const float ppm = config.curveA * pow(ratio, config.curveB);
@@ -75,52 +75,4 @@ bool readDHT(float& tempOut, float& humOut) {
   tempOut = t;
   humOut = h;
   return true;
-}
-
-void checkSensorHealth(
-  float currentTemp,
-  float currentHum,
-  bool simFaultMQ2,
-  bool simFaultDHT,
-  SensorHealthStatus& healthStatus,
-  SystemState& systemState
-) {
-  // 1. Kiem tra tinh trang cam bien MQ-2 (ADC Out-of-Range)
-  const int rawADC = analogRead(PIN_MQ2);
-  if (simFaultMQ2 || rawADC < 30 || rawADC > 4080) {
-    if (!healthStatus.mq2Fault) {
-      healthStatus.mq2Fault = true;
-      strncpy(healthStatus.faultCode, "SENSOR_FAULT_MQ2_DISCONNECT", sizeof(healthStatus.faultCode) - 1);
-      healthStatus.faultCode[sizeof(healthStatus.faultCode) - 1] = '\0';
-      systemState = STATE_FAULT;
-      Serial.println(F("\r\n[FAULT] >>> PHAT HIEN SU CO: Cam bien MQ-2 dut day hoac ADC out-of-range! <<<"));
-    }
-  } else {
-    if (healthStatus.mq2Fault && !simFaultDHT) {
-      healthStatus.mq2Fault = false;
-      strncpy(healthStatus.faultCode, "NONE", sizeof(healthStatus.faultCode) - 1);
-      systemState = STATE_SAFE;
-      Serial.println(F("\r\n[RECOVERY] >>> Cam bien MQ-2 da ket noi lai binh thuong! <<<"));
-    }
-  }
-
-  // 2. Kiem tra tinh trang cam bien DHT22 (NaN hoac vuot dai vat ly)
-  if (simFaultDHT || isnan(currentTemp) || isnan(currentHum) || currentTemp < -10.0f || currentTemp > 85.0f) {
-    if (!healthStatus.dhtFault) {
-      healthStatus.dhtFault = true;
-      strncpy(healthStatus.faultCode, "SENSOR_FAULT_DHT_NAN", sizeof(healthStatus.faultCode) - 1);
-      healthStatus.faultCode[sizeof(healthStatus.faultCode) - 1] = '\0';
-      systemState = STATE_FAULT;
-      Serial.println(F("\r\n[FAULT] >>> PHAT HIEN SU CO: Cam bien DHT22 bao NaN / Timeout! <<<"));
-    }
-  } else {
-    if (healthStatus.dhtFault && !simFaultMQ2) {
-      healthStatus.dhtFault = false;
-      if (!healthStatus.mq2Fault) {
-        strncpy(healthStatus.faultCode, "NONE", sizeof(healthStatus.faultCode) - 1);
-        systemState = STATE_SAFE;
-      }
-      Serial.println(F("\r\n[RECOVERY] >>> Cam bien DHT22 da khoi phuc doc du lieu! <<<"));
-    }
-  }
 }

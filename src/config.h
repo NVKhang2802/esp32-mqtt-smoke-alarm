@@ -2,6 +2,11 @@
 #define CONFIG_H
 
 #include <Arduino.h>
+#include "thresholds.h"
+#include "fsm_core.h"
+#include "ema_filter.h"
+#include "health.h"
+#include "netutil.h"
 
 /**
  * @file config.h
@@ -38,6 +43,7 @@ constexpr const char* WIFI_PASS          = "";
 constexpr const char* MQTT_BROKER        = "broker.emqx.io";
 constexpr uint16_t    MQTT_PORT          = 1883;
 constexpr const char* MQTT_CLIENT_PREFIX = "ESP32_Smoke_Nhom04_";
+constexpr const char* DEVICE_ID          = "ESP32_SMOKE_N04_A01";
 
 // ============================================================================
 // 4. MQTT TOPICS REGISTRY (NHOM09 ENTERPRISE ISOLATION)
@@ -66,13 +72,15 @@ constexpr const char* TOPIC_V2_STATUS        = "Nhom09/smoke/v2/HUIT_A/F03/P302/
 // ============================================================================
 // 5. TIMING CONSTANTS (IN MILLISECONDS)
 // ============================================================================
-constexpr unsigned long SENSOR_POLL_INTERVAL_MS = 2000;   ///< Chu ky doc MQ-2 & publish telemetry
+constexpr unsigned long SAMPLE_MS                = 2000;   ///< Chu ky doc MQ-2 & publish telemetry
 constexpr unsigned long DHT_POLL_INTERVAL_MS    = 5000;   ///< Chu ky doc DHT22
 constexpr unsigned long HEARTBEAT_INTERVAL_MS   = 10000;  ///< Chu ky gui Keep-Alive (10s theo Slide 65)
-constexpr unsigned long COOLDOWN_PURGE_MS       = 30000;  ///< Chu ky thong gio cuong buc 30s sau bao dong
 constexpr unsigned long DEBOUNCE_DELAY_MS       = 50;     ///< Chong rung phim nut bam 50ms
-constexpr unsigned long RECONNECT_INTERVAL_MS   = 5000;   ///< Khoang thoi gian thu lai ket noi non-blocking
-constexpr unsigned long MUTE_DURATION_MS        = 180000; ///< Thoi gian tam ngat chuong khi co lenh mute (3 phut)
+constexpr unsigned long WIFI_ATTEMPT_TIMEOUT_MS = 10000;  ///< Timeout mot lan thu ket noi WiFi
+constexpr unsigned long NET_MAX_BLOCK_MS        = 3000;   ///< Tieu chi do tre toi da giua 2 vong loop
+constexpr uint8_t       MQ2_ENTER_N             = 2;      ///< 2 mau xau lien tiep de vao loi MQ-2
+constexpr uint8_t       MQ2_EXIT_N              = 3;      ///< 3 mau tot lien tiep de thoat loi MQ-2
+constexpr uint8_t       ADC_SAMPLES             = 5;      ///< So mau trung binh lay ADC MQ-2 (5 mau)
 
 // ============================================================================
 // 6. CALIBRATION & THRESHOLD CONSTANTS
@@ -80,9 +88,7 @@ constexpr unsigned long MUTE_DURATION_MS        = 180000; ///< Thoi gian tam nga
 constexpr float MEASURED_RS_AT_CALIB1 = 1.7100f;  ///< Dien tro cam bien kOhm tai 200 PPM (Wokwi)
 constexpr float MEASURED_RS_AT_CALIB2 = 0.8852f;  ///< Dien tro cam bien kOhm tai 1000 PPM (Wokwi)
 constexpr float DEFAULT_ALARM_PPM_DAY = 400.0f;   ///< Nguong bao chay ban ngay (PCCC quy chuan)
-constexpr float DEFAULT_SAFE_PPM_DAY  = 300.0f;   ///< Nguong an toan khoi ban ngay
 constexpr float ALARM_PPM_NIGHT       = 350.0f;   ///< Nguong bao chay ban dem (nhay hon vi it hoat dong)
-constexpr float SAFE_PPM_NIGHT        = 250.0f;   ///< Nguong an toan ban dem
 
 // ============================================================================
 // 7. SYSTEM ENUMS & DATA STRUCTURES
@@ -92,13 +98,12 @@ enum SystemMode : uint8_t {
   MODE_MANUAL = 1
 };
 
-enum SystemState : uint8_t {
-  STATE_SAFE     = 0,
-  STATE_WARNING  = 1,
-  STATE_ALARM    = 2,
-  STATE_COOLDOWN = 3,
-  STATE_FAULT    = 4,
-  STATE_OFFLINE  = 5
+enum AckResult : uint8_t {
+  ACK_ACCEPTED,
+  ACK_SAFETY_LOCK,
+  ACK_LOCAL_SILENCE,
+  ACK_BAD_PAYLOAD,
+  ACK_UNKNOWN_ACTION
 };
 
 struct SensorConfig {
@@ -106,12 +111,8 @@ struct SensorConfig {
   float rlKOhm;
   float curveA;
   float curveB;
-  float alarmThreshold;
-  float safeThreshold;
   float calibPoint1;
   float calibPoint2;
-  unsigned long intervalMQ2;
-  unsigned long intervalDHT;
 };
 
 #endif // CONFIG_H

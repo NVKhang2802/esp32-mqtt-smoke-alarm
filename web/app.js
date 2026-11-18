@@ -242,7 +242,7 @@ function handleIncomingMqtt(topic, payloadStr) {
     const data = JSON.parse(payloadStr);
 
     if (topic === CONFIG.topics.telemetry) {
-      if (data.mq2_ppm !== undefined) STATE.ppm = parseFloat(data.mq2_ppm);
+      if (data.mq2_ppm !== undefined) STATE.ppm = (data.mq2_ppm === null) ? 0 : parseFloat(data.mq2_ppm);
       else if (data.smoke_ppm !== undefined) STATE.ppm = parseFloat(data.smoke_ppm);
 
       if (data.temp !== undefined) STATE.temp = parseFloat(data.temp);
@@ -253,9 +253,20 @@ function handleIncomingMqtt(topic, payloadStr) {
 
       if (data.fan !== undefined) STATE.fanState = (data.fan === "ON" || data.fan === true);
       if (data.buzzer !== undefined) STATE.buzzerActive = (data.buzzer === "ON" || data.buzzer === true);
-      if (data.fsm_state) STATE.fsmState = data.fsm_state;
+      if (data.buzzer_muted !== undefined) STATE.buzzerMuted = data.buzzer_muted;
 
-      evaluateFsmRules();
+      if (data.fsm_state) {
+        STATE.fsmState = data.fsm_state;
+      } else {
+        evaluateFsmRules();
+      }
+
+      if (data.alarm_th) STATE.alarmThreshold = parseFloat(data.alarm_th);
+      if (data.safe_th) STATE.safeThreshold = parseFloat(data.safe_th);
+
+      if (data.mq2_valid !== undefined) STATE.health.mq2 = data.mq2_valid ? "OK" : "FAULT";
+      if (data.dht_valid !== undefined) STATE.health.dht = data.dht_valid ? "OK" : "FAULT";
+
       updateUiFromState();
       pushChartData(STATE.ppm, STATE.temp);
     }
@@ -546,6 +557,12 @@ function updateUiFromState() {
     }
   }
 
+  // Safety Interlock UI: disable Fan OFF and Buzzer MUTE during ALARM
+  const isAlarmState = (STATE.fsmState === "ALARM");
+  if (DOM.btnFanOff) DOM.btnFanOff.disabled = isAlarmState;
+  if (DOM.btnBuzzerMute) DOM.btnBuzzerMute.disabled = isAlarmState;
+  if (DOM.btnBannerMute) DOM.btnBannerMute.disabled = isAlarmState;
+
   // 4. Sensitivity Scheduler Toggle
   if (DOM.badgeNightState && DOM.lblThresholdDesc && DOM.kpiThreshold) {
     if (STATE.sensitivityMode === "NIGHT") {
@@ -785,18 +802,43 @@ function renderAuditTable() {
   filtered.slice(0, 30).forEach(log => {
     const tr = document.createElement("tr");
 
-    let lvlClass = "lvl-sys";
-    if (log.level === "CRITICAL") lvlClass = "lvl-critical";
-    else if (log.level === "WARN") lvlClass = "lvl-warn";
-    else if (log.level === "INFO") lvlClass = "lvl-info";
+    const getLvlClass = typeof safeLevelClass === 'function' ? safeLevelClass : (lv => 'lvl-' + String(lv).toLowerCase());
 
-    tr.innerHTML = `
-      <td style="font-family: var(--font-mono); font-size: 10px; color: #64748b;">${log.time}</td>
-      <td><span class="badge-level ${lvlClass}">${log.level}</span></td>
-      <td><strong style="color: #0f172a; font-size: 11px;">${log.event}</strong></td>
-      <td style="font-size: 11px; color: #334155;">${log.desc}</td>
-      <td style="font-family: var(--font-mono); font-size: 10px; color: #2563eb;">${log.fsm}</td>
-    `;
+    const tdTime = document.createElement("td");
+    tdTime.style.fontFamily = "var(--font-mono)";
+    tdTime.style.fontSize = "10px";
+    tdTime.style.color = "#64748b";
+    tdTime.textContent = log.time || "";
+
+    const tdLvl = document.createElement("td");
+    const spanLvl = document.createElement("span");
+    spanLvl.className = `badge-level ${getLvlClass(log.level)}`;
+    spanLvl.textContent = log.level || "";
+    tdLvl.appendChild(spanLvl);
+
+    const tdEvent = document.createElement("td");
+    const strongEvent = document.createElement("strong");
+    strongEvent.style.color = "#0f172a";
+    strongEvent.style.fontSize = "11px";
+    strongEvent.textContent = log.event || "";
+    tdEvent.appendChild(strongEvent);
+
+    const tdDesc = document.createElement("td");
+    tdDesc.style.fontSize = "11px";
+    tdDesc.style.color = "#334155";
+    tdDesc.textContent = log.desc || "";
+
+    const tdFsm = document.createElement("td");
+    tdFsm.style.fontFamily = "var(--font-mono)";
+    tdFsm.style.fontSize = "10px";
+    tdFsm.style.color = "#2563eb";
+    tdFsm.textContent = log.fsm || "";
+
+    tr.appendChild(tdTime);
+    tr.appendChild(tdLvl);
+    tr.appendChild(tdEvent);
+    tr.appendChild(tdDesc);
+    tr.appendChild(tdFsm);
     tbody.appendChild(tr);
   });
 }
@@ -1165,7 +1207,14 @@ function showToast(message, type = "info") {
   else if (type === "danger") icon = "🚨";
   else if (type === "warning") icon = "⚠️";
 
-  toast.innerHTML = `<span>${icon}</span> <span>${message}</span>`;
+  const iconSpan = document.createElement("span");
+  iconSpan.textContent = icon;
+  const msgSpan = document.createElement("span");
+  msgSpan.textContent = message;
+
+  toast.appendChild(iconSpan);
+  toast.appendChild(document.createTextNode(" "));
+  toast.appendChild(msgSpan);
   container.appendChild(toast);
 
   setTimeout(() => {

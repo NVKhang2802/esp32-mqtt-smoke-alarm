@@ -6,7 +6,9 @@
 #   cấu hình luồng Node-RED (nodered/*.json), cấu hình Wokwi (diagram.json, wokwi.toml),
 #   cấu hình PlatformIO (platformio.ini), file kịch bản MQTTX mẫu, README.md, .gitignore.
 # - KHÔNG ĐƯỢC PUSH (Bị chặn nghiêm ngặt): Nhị phân build PlatformIO, thư viện tải tự động,
-#   bộ công cụ & script tự động hóa nội bộ (tools/), file báo cáo đồ án (docs/),
+#   bộ công cụ & script tự động hóa nội bộ (tools/
+!scripts/
+!scripts/check_claims.py), file báo cáo đồ án (docs/),
 #   file khóa tạm Office, nhật ký runtime, thông tin bảo mật & file rác IDE/OS.
 # ==============================================================================
 
@@ -57,9 +59,13 @@ service_account*.json
 
 # ------------------------------------------------------------------------------
 # 3. BỘ CÔNG CỤ TỰ ĐỘNG HÓA & SCRIPTS NỘI BỘ (LOCAL TOOLS & AUTOMATION)
-# Thư mục tools/ và các script sinh tài liệu/slide chỉ chạy local
+# Thư mục tools/
+!scripts/
+!scripts/check_claims.py và các script sinh tài liệu/slide chỉ chạy local
 # ------------------------------------------------------------------------------
 tools/
+!scripts/
+!scripts/check_claims.py
 *.py
 tests/*.py
 nodered/*.py
@@ -92,7 +98,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+lib/*
+!lib/core/
 lib64/
 parts/
 sdist/

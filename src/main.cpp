@@ -2,7 +2,7 @@
  * @file main.cpp
  * @brief Chuong trinh dieu khien chinh (Main Application Orchestrator)
  * @details De tai 04: He thong bao khoi canh bao som - Nhom 04 (N09)
- *          Kien truc Lean & Clean Code: Stack/Local-bounded JSON allocation (ArduinoJson v7), Modular SRP.
+ *          Kien truc Lean & Clean Code: JsonDocument cap phat heap tam theo RAII trong tung handler, giai phong khi thoat ham; gioi han boi buffer mang (512B) va payload (256B).
  */
 
 #include <Arduino.h>
@@ -14,6 +14,8 @@
 #include "offline_buffer.h"
 #include "sensors.h"
 #include "fsm.h"
+#include "backoff.h"
+#include "cmd_parse.h"
 
 // ============================================================================
 // GLOBAL STATE & SYSTEM CONTEXT
@@ -56,8 +58,8 @@ static uint32_t g_lastDht       = 0;
 static uint32_t g_lastHeartbeat = 0;
 
 // Network backoff & non-blocking state
-static uint32_t s_wifiBackoff = 1000;
-static uint32_t s_mqttBackoff = 1000;
+static ExponentialBackoff s_wifiBackoff;
+static ExponentialBackoff s_mqttBackoff;
 static uint32_t s_wifiEnd     = 0;
 static uint32_t s_wifiBegin   = 0;
 static uint32_t s_mqttTry     = 0;
@@ -284,15 +286,11 @@ static void onFan(const char* message) {
   }
 
   const char* action = doc["action"] | doc["cmd"] | "";
-  if (is(action, "OFF")) {
-    CmdResult cr = cmdRemoteFanOff(g_fsm);
-    publishAck(CMD_FAN, cr == CMD_OK ? ACK_ACCEPTED : ACK_SAFETY_LOCK, cr == CMD_OK ? "FAN_OFF" : "PPM_ABOVE_THRESHOLD");
-  } else if (is(action, "ON")) {
-    cmdRemoteFanOn(g_fsm);
-    publishAck(CMD_FAN, ACK_ACCEPTED, "FAN_ON");
-  } else if (is(action, "AUTO")) {
-    cmdFanAuto(g_fsm);
-    publishAck(CMD_FAN, ACK_ACCEPTED, "MODE_AUTO");
+  ActionAck ack = applyFanAction(g_fsm, action);
+  if (ack == ACTION_ACCEPTED) {
+    publishAck(CMD_FAN, ACK_ACCEPTED, is(action, "AUTO") ? "MODE_AUTO" : (g_fsm.manualFan ? "FAN_ON" : "FAN_OFF"));
+  } else if (ack == ACTION_SAFETY_LOCK) {
+    publishAck(CMD_FAN, ACK_SAFETY_LOCK, "PPM_ABOVE_THRESHOLD");
   } else {
     publishAck(CMD_FAN, ACK_UNKNOWN_ACTION, "UNKNOWN_ACTION");
   }
@@ -307,20 +305,16 @@ static void onBuzzer(const char* message) {
   }
 
   const char* action = doc["action"] | doc["cmd"] | "";
-  if (is(action, "MUTE") || is(action, "OFF")) {
-    CmdResult cr = cmdRemoteMute(g_fsm, millis());
-    publishAck(CMD_BUZZER, cr == CMD_OK ? ACK_ACCEPTED : ACK_SAFETY_LOCK, cr == CMD_OK ? "MUTED_180S" : "ALARM_LATCHED");
-  } else if (is(action, "UNMUTE")) {
-    cmdRemoteUnmute(g_fsm);
-    publishAck(CMD_BUZZER, ACK_ACCEPTED, "UNMUTED");
-  } else if (is(action, "TEST") || is(action, "ON")) {
-    CmdResult cr = cmdBuzzerTest(g_fsm);
-    if (cr == CMD_OK) {
+  ActionAck ack = applyBuzzerAction(g_fsm, action, millis());
+  if (ack == ACTION_ACCEPTED) {
+    if (is(action, "TEST") || is(action, "ON")) {
       buzzerTest(millis());
       publishAck(CMD_BUZZER, ACK_ACCEPTED, "TEST_500MS");
     } else {
-      publishAck(CMD_BUZZER, ACK_SAFETY_LOCK, "ALARM_LATCHED");
+      publishAck(CMD_BUZZER, ACK_ACCEPTED, g_fsm.muted ? "MUTED_180S" : "UNMUTED");
     }
+  } else if (ack == ACTION_SAFETY_LOCK) {
+    publishAck(CMD_BUZZER, ACK_SAFETY_LOCK, "ALARM_LATCHED");
   } else {
     publishAck(CMD_BUZZER, ACK_UNKNOWN_ACTION, "UNKNOWN_ACTION");
   }
@@ -477,7 +471,7 @@ static bool mqttConnect() {
 static void netTick(uint32_t now) {
   if (WiFi.status() != WL_CONNECTED) {
     if (!s_wifiBusy) {
-      if (now - s_wifiEnd >= s_wifiBackoff) {
+      if (now - s_wifiEnd >= s_wifiBackoff.currentMs) {
         WiFi.disconnect();
         WiFi.begin(WIFI_SSID, WIFI_PASS);
         s_wifiBusy = true;
@@ -486,13 +480,13 @@ static void netTick(uint32_t now) {
     } else if (now - s_wifiBegin >= WIFI_ATTEMPT_TIMEOUT_MS) {
       s_wifiBusy = false;
       s_wifiEnd = now;
-      s_wifiBackoff = nextBackoff(s_wifiBackoff, 16000);
+      s_wifiBackoff.fail();
     }
     return;
   }
 
   s_wifiBusy = false;
-  s_wifiBackoff = 1000;
+  s_wifiBackoff.reset();
 
   if (g_mqttClient.connected()) {
     g_mqttClient.loop();
@@ -500,9 +494,13 @@ static void netTick(uint32_t now) {
     return;
   }
 
-  if (now - s_mqttTry >= s_mqttBackoff) {
+  if (now - s_mqttTry >= s_mqttBackoff.currentMs) {
     s_mqttTry = now;
-    s_mqttBackoff = mqttConnect() ? 1000 : nextBackoff(s_mqttBackoff, 16000);
+    if (mqttConnect()) {
+      s_mqttBackoff.reset();
+    } else {
+      s_mqttBackoff.fail();
+    }
   }
 }
 

@@ -136,24 +136,44 @@ test('FLOW-02: Auth populates fleet topology & Core Engine generates hierarchica
   assert.equal(dispatched.topic, 'Nhom09/smoke/v2/HUIT_A/F03/P303/ESP32_SMOKE_N04_A02/cmd/buzzer');
 });
 
-test('FLOW-03: Scheduler inject & tick updates fleet Day/Night thresholds', () => {
-  const flowCtx = createMockContext();
-  flowCtx.set('fleet', {
-    ESP32_SMOKE_N04_A01: { deviceId: 'ESP32_SMOKE_N04_A01', alarmTh: 400, safeTh: 300 }
-  });
+test('FLOW-03: Scheduler inject & tick updates fleet Day/Night thresholds deterministically', () => {
+  const origGetHours = Date.prototype.getHours;
+  try {
+    const flowCtx = createMockContext();
+    flowCtx.set('fleet', {
+      ESP32_SMOKE_N04_A01: { deviceId: 'ESP32_SMOKE_N04_A01', alarmTh: 400, safeTh: 300 }
+    });
 
-  const schedTick = nodeMap.get('fn_scheduler_tick');
-  const parseSched = nodeMap.get('fn_parse_scheduler');
-  const coreEngine = nodeMap.get('fn_core_fsm_engine');
+    const schedTick = nodeMap.get('fn_scheduler_tick');
+    const parseSched = nodeMap.get('fn_parse_scheduler');
+    const coreEngine = nodeMap.get('fn_core_fsm_engine');
 
-  // Run scheduler tick
-  const tickOut = runNodeFunction(schedTick, {}, flowCtx);
-  if (tickOut) {
-    const parsedSched = runNodeFunction(parseSched, tickOut, flowCtx);
-    assert.equal(parsedSched.eventType, 'SCHEDULER_CMD');
-    const [cmds, logs, dashboard] = runNodeFunction(coreEngine, parsedSched, flowCtx);
-    const updatedDev = flowCtx.get('fleet')['ESP32_SMOKE_N04_A01'];
-    assert.ok(updatedDev.alarmTh === 350 || updatedDev.alarmTh === 400);
+    // 1. Simulate NIGHT (23h)
+    Date.prototype.getHours = () => 23;
+    flowCtx.set('sched', null); // clear state
+    const nightTick = runNodeFunction(schedTick, {}, flowCtx);
+    assert.ok(nightTick, 'Scheduler tick must fire for NIGHT');
+    const nightParsed = runNodeFunction(parseSched, nightTick, flowCtx);
+    assert.equal(nightParsed.eventType, 'SCHEDULER_CMD');
+    assert.equal(nightParsed.mode, 'NIGHT');
+    runNodeFunction(coreEngine, nightParsed, flowCtx);
+    let dev = flowCtx.get('fleet')['ESP32_SMOKE_N04_A01'];
+    assert.equal(dev.alarmTh, 350, 'NIGHT mode must set alarmTh to 350');
+    assert.equal(dev.safeTh, 262.5, 'NIGHT mode must set safeTh to 262.5');
+
+    // 2. Simulate DAY (14h)
+    Date.prototype.getHours = () => 14;
+    const dayTick = runNodeFunction(schedTick, {}, flowCtx);
+    assert.ok(dayTick, 'Scheduler tick must fire for transition to DAY');
+    const dayParsed = runNodeFunction(parseSched, dayTick, flowCtx);
+    assert.equal(dayParsed.eventType, 'SCHEDULER_CMD');
+    assert.equal(dayParsed.mode, 'DAY');
+    runNodeFunction(coreEngine, dayParsed, flowCtx);
+    dev = flowCtx.get('fleet')['ESP32_SMOKE_N04_A01'];
+    assert.equal(dev.alarmTh, 400, 'DAY mode must set alarmTh to 400');
+    assert.equal(dev.safeTh, 300, 'DAY mode must set safeTh to 300');
+  } finally {
+    Date.prototype.getHours = origGetHours;
   }
 });
 

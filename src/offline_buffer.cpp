@@ -1,70 +1,63 @@
 #include "offline_buffer.h"
 
-static OfflineRecord s_offlineBuffer[OFFLINE_BUF_SIZE];
-static int s_offlineHead = 0;
-static int s_offlineCount = 0;
+static RingBuffer<OfflineRecord, OFFLINE_BUF_SIZE> s_ringBuffer;
 
 void initOfflineBuffer() {
-  s_offlineHead = 0;
-  s_offlineCount = 0;
-  memset(s_offlineBuffer, 0, sizeof(s_offlineBuffer));
+  s_ringBuffer.clear();
 }
 
 void pushOfflineRecord(float ppm, float temp, float hum, bool fan, bool buzzer, const char* stateStr, const char* eventType, bool mq2Valid, bool dhtValid) {
-  s_offlineBuffer[s_offlineHead].timestamp = millis() / 1000;
-  s_offlineBuffer[s_offlineHead].ppm = ppm;
-  s_offlineBuffer[s_offlineHead].temp = temp;
-  s_offlineBuffer[s_offlineHead].hum = hum;
-  s_offlineBuffer[s_offlineHead].fan = fan;
-  s_offlineBuffer[s_offlineHead].buzzer = buzzer;
-  s_offlineBuffer[s_offlineHead].mq2Valid = mq2Valid;
-  s_offlineBuffer[s_offlineHead].dhtValid = dhtValid;
+  OfflineRecord rec;
+  rec.timestamp = millis() / 1000;
+  rec.ppm = ppm;
+  rec.temp = temp;
+  rec.hum = hum;
+  rec.fan = fan;
+  rec.buzzer = buzzer;
+  rec.mq2Valid = mq2Valid;
+  rec.dhtValid = dhtValid;
 
   if (stateStr != nullptr) {
-    strncpy(s_offlineBuffer[s_offlineHead].state, stateStr, sizeof(s_offlineBuffer[s_offlineHead].state) - 1);
-    s_offlineBuffer[s_offlineHead].state[sizeof(s_offlineBuffer[s_offlineHead].state) - 1] = '\0';
+    strncpy(rec.state, stateStr, sizeof(rec.state) - 1);
+    rec.state[sizeof(rec.state) - 1] = '\0';
   } else {
-    strncpy(s_offlineBuffer[s_offlineHead].state, "UNKNOWN", sizeof(s_offlineBuffer[s_offlineHead].state) - 1);
+    strncpy(rec.state, "UNKNOWN", sizeof(rec.state) - 1);
   }
 
   if (eventType != nullptr) {
-    strncpy(s_offlineBuffer[s_offlineHead].eventType, eventType, sizeof(s_offlineBuffer[s_offlineHead].eventType) - 1);
-    s_offlineBuffer[s_offlineHead].eventType[sizeof(s_offlineBuffer[s_offlineHead].eventType) - 1] = '\0';
+    strncpy(rec.eventType, eventType, sizeof(rec.eventType) - 1);
+    rec.eventType[sizeof(rec.eventType) - 1] = '\0';
   } else {
-    strncpy(s_offlineBuffer[s_offlineHead].eventType, "TELEMETRY", sizeof(s_offlineBuffer[s_offlineHead].eventType) - 1);
+    strncpy(rec.eventType, "TELEMETRY", sizeof(rec.eventType) - 1);
   }
 
-  s_offlineHead = (s_offlineHead + 1) % OFFLINE_BUF_SIZE;
-  if (s_offlineCount < (int)OFFLINE_BUF_SIZE) {
-    s_offlineCount++;
-  }
+  s_ringBuffer.push(rec);
 }
 
 void flushOfflineBuffer(PubSubClient& client, const char* topic, int maxBatch) {
-  if (s_offlineCount == 0 || !client.connected() || topic == nullptr) {
+  if (s_ringBuffer.empty() || !client.connected() || topic == nullptr) {
     return;
   }
 
-  const int toSend = (s_offlineCount < maxBatch) ? s_offlineCount : maxBatch;
-  const int startIdx = (s_offlineHead - s_offlineCount + OFFLINE_BUF_SIZE) % OFFLINE_BUF_SIZE;
+  const size_t toSend = (s_ringBuffer.size() < (size_t)maxBatch) ? s_ringBuffer.size() : (size_t)maxBatch;
   char payload[256];
-  int successfullySent = 0;
+  size_t successfullySent = 0;
 
-  for (int idx = 0; idx < toSend; idx++) {
-    const int cur = (startIdx + idx) % OFFLINE_BUF_SIZE;
+  for (size_t idx = 0; idx < toSend; idx++) {
+    const OfflineRecord& rec = s_ringBuffer.getOldest(idx);
     snprintf(payload, sizeof(payload),
-      "{\"sync_seq\":%d,\"ts\":%lu,\"type\":\"%s\",\"mq2_ppm\":%.1f,\"temp\":%.1f,\"hum\":%.1f,\"fan\":\"%s\",\"buzzer\":\"%s\",\"state\":\"%s\",\"mq2_valid\":%s,\"dht_valid\":%s}",
+      "{\"sync_seq\":%zu,\"ts\":%lu,\"type\":\"%s\",\"mq2_ppm\":%.1f,\"temp\":%.1f,\"hum\":%.1f,\"fan\":\"%s\",\"buzzer\":\"%s\",\"state\":\"%s\",\"mq2_valid\":%s,\"dht_valid\":%s}",
       idx + 1,
-      s_offlineBuffer[cur].timestamp,
-      s_offlineBuffer[cur].eventType,
-      s_offlineBuffer[cur].ppm,
-      s_offlineBuffer[cur].temp,
-      s_offlineBuffer[cur].hum,
-      s_offlineBuffer[cur].fan ? "ON" : "OFF",
-      s_offlineBuffer[cur].buzzer ? "ON" : "OFF",
-      s_offlineBuffer[cur].state,
-      s_offlineBuffer[cur].mq2Valid ? "true" : "false",
-      s_offlineBuffer[cur].dhtValid ? "true" : "false"
+      rec.timestamp,
+      rec.eventType,
+      rec.ppm,
+      rec.temp,
+      rec.hum,
+      rec.fan ? "ON" : "OFF",
+      rec.buzzer ? "ON" : "OFF",
+      rec.state,
+      rec.mq2Valid ? "true" : "false",
+      rec.dhtValid ? "true" : "false"
     );
 
     if (!client.publish(topic, payload)) {
@@ -75,12 +68,12 @@ void flushOfflineBuffer(PubSubClient& client, const char* topic, int maxBatch) {
     delay(20);
   }
 
-  s_offlineCount -= successfullySent;
+  s_ringBuffer.drop(successfullySent);
   if (successfullySent > 0) {
-    Serial.printf("[OFFLINE BUFFER] Da dong bo %d ban ghi. Con lai trong dem: %d\r\n", successfullySent, s_offlineCount);
+    Serial.printf("[OFFLINE BUFFER] Da dong bo %zu ban ghi. Con lai trong dem: %zu\r\n", successfullySent, s_ringBuffer.size());
   }
 }
 
 int getOfflineBufferCount() {
-  return s_offlineCount;
+  return static_cast<int>(s_ringBuffer.size());
 }

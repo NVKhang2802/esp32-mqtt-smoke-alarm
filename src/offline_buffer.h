@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <PubSubClient.h>
+#include "ring_buffer.h"
 
 /**
  * @file offline_buffer.h

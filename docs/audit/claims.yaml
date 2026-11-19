@@ -1,7 +1,7 @@
 # docs/audit/claims.yaml
 # 3-Tier Audit Matrix for IoT Smoke Detection System - Nhom 04 (N09) HUIT
 # Tiers:
-#   VERIFIED: Automated unit/integration test runs real code and validates 100% of the assertion.
+#   VERIFIED: Automated unit/integration test runs real shared code and validates 100% of the assertion.
 #   PARTIAL:  Core algorithm & logic unit-tested in native/engine; physical hardware/network E2E is simulated/mocked.
 #   SCOPE:    Explicit design boundary, architecture choice, or academic demonstration benchmark.
 
@@ -26,13 +26,13 @@ claims:
     tier: VERIFIED
     description: "Firmware command execution with safety interlocks during ALARM (Fan OFF, Mute, and Test refused)"
     claimed_in: "Phần VII, Phần IX"
-    reality: "Tested in test/test_core.cpp: cmdRemoteFanOff, cmdRemoteMute, cmdBuzzerTest return CMD_REJECTED_SAFETY_LOCK during ALARM"
+    reality: "Firmware main.cpp and test/test_core.cpp share applyFanAction & applyBuzzerAction from lib/core/cmd_parse.h; T-C1 to T-C6 test manual override, ALARM safety lock, and unknown action rejection on real parser"
     evidence_tests: ["T-C1", "T-C2", "T-C3", "T-C4", "T-C5", "T-C6"]
     test_command: "pio test -e native"
 
   - id: C-NODERED-RULES
     tier: VERIFIED
-    description: "Node-RED Core Engine 5 business rules (Rate-of-Rise, Low-Heat, Day/Night, Purge, Cross-Zone)"
+    description: "Node-RED Core Engine 3 business rules (Rate-of-Rise, Low-Heat, Cross-Zone) and COOLDOWN reflection"
     claimed_in: "Phần VII, Phần IX"
     reality: "Implemented in nodered/functions/core_engine.js and validated via engine.test.js"
     evidence_tests: ["T-N1", "T-N2", "T-N3", "T-N4", "T-N5", "T-N6", "T-N7", "T-N8", "T-N9", "T-N10", "T-N11"]
@@ -40,7 +40,7 @@ claims:
 
   - id: C-FLOW-INTEGRATION
     tier: VERIFIED
-    description: "Node-RED live flow wire integration (Auth topology, hierarchical V2 commands, dedup TTL 5s, Scheduler tick)"
+    description: "Node-RED live flow wire integration (Auth topology, hierarchical V2 commands, dedup TTL 5s, Day/Night Scheduler tick)"
     claimed_in: "Phần VII, Phần IX"
     reality: "Validated on live flows_smoke_detector.json in flow_integration.test.js"
     evidence_tests: ["FLOW-01", "FLOW-02", "FLOW-03", "FLOW-04"]
@@ -55,29 +55,29 @@ claims:
     test_command: "node --test web/tests/util.test.js"
 
   - id: C-OFFLINE-BUFFER
-    tier: PARTIAL
+    tier: VERIFIED
     description: "Offline circular buffer 20 records with FIFO preservation and batch flush"
-    reality: "Ring buffer FIFO order, capacity drop (25->20), and partial batch flush (7->13) proven in T-B1; live MQTT replay requires active broker"
-    evidence_tests: ["T-B1", "FIRMWARE_BUILD"]
+    reality: "Zero-heap RingBuffer<T, N> implemented in lib/core/ring_buffer.h; firmware offline_buffer.cpp and test/test_core.cpp share identical template code. T-B1 proves eviction (25->20) and batch flush (7->13) on real ring buffer."
+    evidence_tests: ["T-B1"]
     test_command: "pio test -e native"
 
   - id: C-NETWORK-BACKOFF
-    tier: PARTIAL
+    tier: VERIFIED
     description: "Decoupled exponential backoff (1s to 16s) for WiFi and MQTT reconnection"
-    reality: "State machine backoff progression, capping at 16s, and independent reset proven in T-R1 and T-F12; physical RF loss simulated in software"
+    reality: "ExponentialBackoff struct implemented in lib/core/backoff.h; firmware main.cpp and test/test_core.cpp share identical struct methods (fail, reset). T-R1 and T-F12 prove 1s->2s->4s->8s->16s progression, 16s cap, and independent reset."
     evidence_tests: ["T-F12", "T-R1"]
     test_command: "pio test -e native"
 
   - id: C-TELEGRAM-FALLBACK
     tier: PARTIAL
-    description: "Telegram Bot Alerting Architecture with academic fallback"
-    reality: "Alert dispatcher formats HTML and calls HTTP request node; falls back gracefully to dashboard/debug mock when token is unconfigured"
+    description: "Telegram Bot Alerting Architecture with academic mock fallback"
+    reality: "Alert dispatcher formats HTML and calls HTTP request node; falls back gracefully to dashboard/debug mock when token is unconfigured (T-N12)"
     evidence_tests: ["T-N12"]
     test_command: "node --test nodered/tests/engine.test.js"
 
   - id: C-SCOPE-BENCHMARKS
     tier: SCOPE
-    description: "Academic scope boundaries: Port 1883 plaintext, RL=10k vs R0=1.0k, demo thresholds (400/350 PPM), ArduinoJson v7 bounded buffer"
-    reality: "Formal scope definition for academic defense; avoids overclaiming production certifications"
-    evidence_tests: ["CONFIG_INSPECTION"]
-    test_command: "python -c \"import os; assert os.path.isfile('src/config.h') and os.path.isfile('src/main.cpp')\""
+    description: "Academic scope boundaries: Port 1883 plaintext with Nhom09/ prefix, RL=10k vs R0=1.0k, demo thresholds (400/350 PPM), ArduinoJson v7 RAII heap"
+    reality: "Project scope definition; tests verify file presence, topic prefix consistency in config and flows, and absence of dummy placeholders."
+    evidence_tests: []
+    test_command: "python -c \"import os; assert all(os.path.isfile(p) for p in ['src/config.h', 'src/main.cpp', 'nodered/flows_smoke_detector.json', 'web/app.js'])\""

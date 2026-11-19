@@ -4,11 +4,13 @@
 scripts/check_claims.py
 Audits and dynamically verifies all claims declared in docs/audit/claims.yaml.
 Supports 3-tier classification: VERIFIED, PARTIAL, SCOPE.
-Ensures zero discrepancies between claims and codebase reality.
+Performs AST/regex source code validation ensuring zero simulated or missing test IDs.
 """
 
 import os
 import sys
+import glob
+import re
 import yaml
 import subprocess
 
@@ -22,10 +24,38 @@ def run_cmd(cmd):
     except Exception as e:
         return False, str(e)
 
+def collect_source_test_ids():
+    """Scans all test files to collect real implemented test IDs (T-*, FLOW-*)."""
+    search_patterns = [
+        os.path.join(BASE_DIR, "test", "**", "*.*"),
+        os.path.join(BASE_DIR, "nodered", "tests", "**", "*.*"),
+        os.path.join(BASE_DIR, "web", "tests", "**", "*.*"),
+    ]
+    test_files = []
+    for pat in search_patterns:
+        test_files.extend(glob.glob(pat, recursive=True))
+
+    found_ids = set()
+    test_id_regex = re.compile(r'\b(T-[A-Z0-9]+|FLOW-[0-9]+)\b')
+
+    for filepath in test_files:
+        if not os.path.isfile(filepath):
+            continue
+        try:
+            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+                matches = test_id_regex.findall(content)
+                found_ids.update(matches)
+        except Exception as e:
+            print(f"[WARN] Failed to read {filepath}: {e}")
+
+    return found_ids
+
 def main():
     print("=" * 80)
     print("  3-TIER AUDIT CLAIM VALIDATOR - NHOM 04 HUIT (CODEBASE AUDIT V5)")
     print("  Classification: [VERIFIED] Fully Proven | [PARTIAL] Algorithmic | [SCOPE] Design Boundary")
+    print("  Source Code Validation: Checking test ID integrity against codebase...")
     print("=" * 80)
 
     if not os.path.isfile(CLAIMS_FILE):
@@ -36,7 +66,10 @@ def main():
         data = yaml.safe_load(f)
 
     claims = data.get("claims", [])
-    print(f"Loaded {len(claims)} audit claims from: {CLAIMS_FILE}\n")
+    print(f"Loaded {len(claims)} audit claims from: {CLAIMS_FILE}")
+
+    source_test_ids = collect_source_test_ids()
+    print(f"Discovered {len(source_test_ids)} distinct test IDs in test source files.\n")
 
     results = []
     has_failure = False
@@ -44,14 +77,41 @@ def main():
     for c in claims:
         cid = c.get("id")
         tier = c.get("tier", "VERIFIED")
-        desc = c.get("description")
+        desc = c.get("description", "")
         cmd = c.get("test_command")
+        evidence = c.get("evidence_tests", [])
 
         print(f"Checking [{cid}] ({tier}): {desc[:48]}...", end=" ", flush=True)
 
-        if not cmd:
+        # 1. Source code check: verify that all evidence tests exist in test source code
+        missing_ids = []
+        for tid in evidence:
+            if (tid.startswith("T-") or tid.startswith("FLOW-")) and tid not in source_test_ids:
+                missing_ids.append(tid)
+
+        if missing_ids:
+            verdict = "FAIL"
+            err_msg = f"Evidence test ID(s) not found in test source files: {', '.join(missing_ids)}"
+            print("\033[91m[FAILED - MISSING TEST ID]\033[0m" if sys.platform != "win32" else "[FAILED - MISSING TEST ID]")
+            print(f"  {err_msg}\n")
+            results.append((cid, tier, verdict, err_msg))
+            has_failure = True
+            continue
+
+        # 2. Check for empty test command
+        if not cmd or not cmd.strip():
             print("[WARN] No verification command")
             results.append((cid, tier, "SKIPPED", "No test command"))
+            continue
+
+        # 3. Disallow dummy commands for VERIFIED or PARTIAL tiers
+        if tier in ("VERIFIED", "PARTIAL") and "print(" in cmd:
+            verdict = "FAIL"
+            err_msg = f"Dummy test command rejected for {tier} tier: {cmd}"
+            print("\033[91m[FAILED - DUMMY CMD]\033[0m" if sys.platform != "win32" else "[FAILED - DUMMY CMD]")
+            print(f"  {err_msg}\n")
+            results.append((cid, tier, verdict, err_msg))
+            has_failure = True
             continue
 
         ok, out = run_cmd(cmd)
@@ -76,11 +136,11 @@ def main():
             has_failure = True
 
     print("\n" + "=" * 80)
-    print(f"{'Claim ID':<20} | {'Tier':<10} | {'Verdict':<15} | {'Evidence':<25}")
+    print(f"{'Claim ID':<22} | {'Tier':<10} | {'Verdict':<15} | {'Evidence':<25}")
     print("-" * 80)
     for cid, tier, verdict, _ in results:
         ev = next((','.join(c.get('evidence_tests', [])) for c in claims if c.get('id') == cid), "")
-        print(f"{cid:<20} | {tier:<10} | {verdict:<15} | {ev:<25}")
+        print(f"{cid:<22} | {tier:<10} | {verdict:<15} | {ev:<25}")
     print("=" * 80)
 
     count_verified = sum(1 for _, t, v, _ in results if t == "VERIFIED" and v == "VERIFIED_PASS")
@@ -100,7 +160,7 @@ def main():
         print("=" * 80)
         sys.exit(0)
     else:
-        print("  VERDICT: AUDIT FAILED DUE TO DISCREPANCIES.")
+        print("  VERDICT: AUDIT FAILED - RESOLVE DISCREPANCIES ABOVE.")
         print("=" * 80)
         sys.exit(1)
 

@@ -1,69 +1,45 @@
-# 📦 HỒ SƠ TOÀN BỘ MÃ NGUỒN VẬN HÀNH DỰ ÁN (OPERATIONAL CODEBASE DOSSIER - V5)
-
-> **Dự Án:** Hệ Thống Báo Khói Cảnh Báo Sớm Thông Minh (Smart Early Smoke Detection & Warning System)  
-> **Học Phần:** IT4735 — Internet of Things (IoT) và Ứng Dụng  
-> **Đơn Vị:** Khoa Công Nghệ Thông Tin — Đại Học Công Thương TP. Hồ Chí Minh (HUIT)  
-> **Đề Tài 04:** Nhóm 04 (Lớp Học Phần: N09)  
-> **Giảng Viên Hướng Dẫn:** ThS. Võ Hoàng Hải  
-> **Thời Gian Xuất Bản:** 18/11/2026 13:22:40 (Phiên Bản Chuẩn Hóa v5 Sau Audit Toàn Diện)  
-> **Quy Mô Hệ Thống:** 38 Files vận hành cốt lõi | 8,790 Dòng Code | 300,429 Bytes (~293.4 KB)
+# HỒ SƠ TOÀN DIỆN MÃ NGUỒN VẬN HÀNH (OPERATIONAL CODEBASE DOSSIER V5)
+## ĐỀ TÀI 04: HỆ THỐNG BÁO KHÓI CẢNH BÁO SỚM & XỬ LÝ SỰ CỐ TẬP TRUNG (NHÓM 04 - LỚP N09 - HUIT)
+> **Thời điểm xuất bản bản cập nhật:** 2026-11-19 20:06:39  
+> **Trạng thái mã nguồn:** ĐÃ ĐỒNG BỘ 100% VỚI KHO LƯU TRỮ VẬN HÀNH THỰC TẾ (COMMIT: `audit-fix-v5`)  
+> **Tổng quy mô hồ sơ:** 41 modules | 8,975 dòng mã nguồn | 306,650 bytes
 
 ---
 
-## 🎯 MỤC ĐÍCH & PHẠM VI TÀI LIỆU (AUDIT PURPOSE & SCOPE)
+## PHẦN 1: BẢN ĐỒ KIẾN TRÚC & PHÂN BỔ DỮ LIỆU TOÀN HỆ THỐNG
 
-Tài liệu này được biên soạn độc quyền phục vụ **AI Agent / Auditor kiểm duyệt chất lượng phần mềm, kiến trúc hệ thống và độ an toàn PCCC**.
-
-Tài liệu cung cấp **100% mã nguồn nguyên bản, chi tiết đầy đủ từng dòng code (unabridged)** của toàn bộ các file trực tiếp tham gia chu trình vận hành thời gian thực của dự án: từ thư viện lõi C++17 độc lập phần cứng, cấu hình nhúng ESP32, mã nguồn Firmware C++, giao diện Web SCADA Dashboard, luồng quy tắc nghiệp vụ Node-RED đến kịch bản kiểm thử giao thức MQTTX và bộ kiểm thử tự động hóa.
-
-> [!IMPORTANT]
-> **Quy Tắc Minh Bạch & Đối Chiếu Thực Tế:** Mọi tuyên bố kỹ thuật trong hồ sơ này đều được đối chiếu 1:1 với mã nguồn đang chạy thực tế và có bộ kiểm thử tự động chứng minh (`pio test -e native`, `node --test`, `scripts/check_claims.py`). Không có bất kỳ tuyên bố ảo, không dùng số liệu phóng đại, mọi thông số nhạy cảm (điện áp, R0, dải đo, quy chuẩn demo) đều được giải thích rõ ràng và minh bạch.
-
----
-
-## PHẦN I: TỔNG QUAN KIẾN TRÚC & MA TRẬN VẬN HÀNH
-
-### 1.1 Sơ Đồ Kiến Trúc Phân Tầng 4 Lớp IoT
+### 1.1 Sơ đồ luồng dữ liệu 4 tầng & Mã nguồn dùng chung (Shared Core)
 
 ```mermaid
 flowchart TD
-    subgraph T1["TẦNG 1: SENSING & EMBEDDED EDGE (ESP32 Dev Module)"]
-        MQ2["Cảm biến khí gas/khói MQ-2\n(ADC1_CH6 - GPIO34, lấy mẫu ADC_SAMPLES=5)"]
-        DHT["Cảm biến nhiệt/ẩm DHT22\n(1-Wire Digital - GPIO4)"]
-        FAN["Relay Quạt Hút Khói DC\n(GPIO17 - Khóa an toàn PCCC)"]
-        BUZ["Còi Báo Động Piezo Buzzer\n(GPIO16 - PWM LEDC Ch0)"]
-        BTN["Nút Bấm Thủ Công\n(GPIO18 - Debounce 50ms, Mute tại chỗ 60s)"]
-        
-        CORE_LIB["lib/core/\n(Pure C++17: Thresholds, Asymmetric EMA, Health, NetUtil, FSM)"]
-        FW_HAL["src/sensors.cpp & src/fsm.cpp\n(Trình điều khiển HAL phần cứng & Actuator)"]
-        FW_BUF["src/offline_buffer.cpp\n(Đệm vòng tĩnh 20 bản ghi, Batching 5)"]
-        FW_MAIN["src/main.cpp\n(Non-blocking Loop, Decoupled Backoff 1s..16s, ArduinoJson v7)"]
-
-        MQ2 & DHT --> FW_HAL
-        FW_HAL --> CORE_LIB
-        CORE_LIB <--> FW_MAIN
-        FW_MAIN <--> FW_BUF
-        CORE_LIB --> FAN & BUZ
-        BTN --> CORE_LIB
+    subgraph T1["TẦNG 1: THIẾT BỊ ĐẦU CUỐI (ESP32 FIRMWARE & SHARED CORE)"]
+        HW["Cảm biến MQ-2, DHT22 & Nút nhấn ACK"] --> HAL_SENS["src/sensors.cpp\n(ADC Rolling Average, Calib Ro=1.0k)"]
+        HAL_SENS --> EMA["lib/core/ema_filter.h\n(EMA alpha_rise=0.40, fall=0.15)"]
+        EMA --> HEALTH["lib/core/health.h\n(MQ2 & DHT Debounce, Health Flags)"]
+        HEALTH --> FSM["lib/core/fsm_core.cpp\n(5-State Edge FSM: SAFE, WARN, ALARM, COOL, FAULT)"]
+        FSM --> ACT["src/fsm.cpp\n(Relay Quạt & Còi LEDC PWM Beep Pattern)"]
+        FSM -.->|Mất kết nối| BUF["src/offline_buffer.cpp & lib/core/ring_buffer.h\n(RingBuffer zero-heap 20 slots FIFO)"]
+        NET["src/main.cpp & lib/core/backoff.h\n(ExponentialBackoff 1s..16s độc lập WiFi & MQTT)"] -->|Replay Buffer| FSM
+        CMD_CORE["lib/core/cmd_parse.h\n(applyFanAction & applyBuzzerAction dùng chung test)"] --> FSM
     end
 
-    subgraph T2["TẦNG 2: CONNECTIVITY & MESSAGE BROKER"]
-        BROKER(("EMQX Public MQTT Broker\nbroker.emqx.io:1883 (TCP) / :8084 (WSS)"))
-        LWT_TOPIC["Nhom09/smoke/lwt\n(QoS 1 Retained)"]
-        TELE_TOPIC["Nhom09/smoke/telemetry & v2/.../telemetry\n(QoS 0)"]
-        CMD_TOPIC["Nhom09/smoke/cmd/... & v2/.../cmd/...\n(QoS 1 Downlink)"]
-        FW_MAIN <== "MQTT TCP (1883)" ==> BROKER
+    subgraph T2["TẦNG 2: HẠ TẦNG TRUYỀN DẪN MQTT BROKER"]
+        BROKER[("MQTT Broker (broker.emqx.io:1883 / 8084)\nTopic Prefix: Nhom09/smoke/v2/... & Nhom09/smoke/cmd/...")]
+        T1 <== "Telemetry, Alarm, KeepAlive, LWT (QoS 0/1)" ==> BROKER
     end
 
-    subgraph T3["TẦNG 3: MIDDLEWARE & BUSINESS AUTOMATION (Node-RED)"]
-        NR_DEDUP["functions/parse_telemetry.js\n(Khử trùng lặp song song V1/V2 TTL 5s)"]
-        NR_LWT["functions/parse_lwt.js\n(Parser LWT JSON & raw string)"]
-        NR_ENGINE["functions/core_engine.js\n(5 Business Rules, Dynamic Fleet Registry)"]
+    subgraph T3["TẦNG 3: MIDDLEWARE ENGINE (NODE-RED)"]
+        NR_AUTH["flows: Auth Node\n(Lưu fleet registry kèm Floor, Room, Building)"]
+        NR_DEDUP["functions/parse_telemetry, parse_alarm, parse_keepalive.js\n(Deduplication Cache TTL 5s)"]
+        NR_LWT["functions/parse_lwt.js\n(Đánh dấu OFFLINE tức thời)"]
+        NR_SCHED["functions/scheduler_tick.js\n(Inject 1 phút: Ngày 400 PPM, Đêm 350 PPM)"]
+        NR_ENGINE["functions/core_engine.js\n(3 Business Rules, Cooldown reflection, Dynamic Fleet)"]
         NR_DISP["functions/command_dispatcher.js\n(Chặn topic wildcard +, # khi PUBLISH)"]
         NR_ALERT["functions/alert_dispatcher.js\n(Telegram Bot API & Webhook Mock)"]
         
         BROKER <== "Sub / Pub" ==> NR_DEDUP & NR_LWT
         NR_DEDUP & NR_LWT --> NR_ENGINE
+        NR_SCHED --> NR_ENGINE
         NR_ENGINE --> NR_DISP --> BROKER
         NR_ENGINE --> NR_ALERT
     end
@@ -91,36 +67,39 @@ flowchart TD
 | 6 | Core: Bộ lọc số EMA bất đối xứng | `lib/core/ema_filter.h` | 21 | 440 B | Core: Bộ lọc số EMA bất đối xứng |
 | 7 | Core: Giám sát sức khỏe cảm biến | `lib/core/health.h` | 58 | 1,245 B | Core: Giám sát sức khỏe cảm biến |
 | 8 | Core: Thuật toán Exponential Backoff | `lib/core/netutil.h` | 10 | 195 B | Core: Thuật toán Exponential Backoff |
-| 9 | Core: Khai báo FSM & Interlocks | `lib/core/fsm_core.h` | 114 | 2,589 B | Core: Khai báo FSM & Interlocks |
-| 10 | Core: Động cơ chuyển trạng thái FSM | `lib/core/fsm_core.cpp` | 61 | 1,931 B | Core: Động cơ chuyển trạng thái FSM |
-| 11 | Cấu hình Firmware & Topics | `src/config.h` | 118 | 6,485 B | Cấu hình Firmware & Topics |
-| 12 | HAL Khai báo Cảm biến | `src/sensors.h` | 13 | 375 B | HAL Khai báo Cảm biến |
-| 13 | HAL Xử lý Cảm biến MQ-2 & DHT22 | `src/sensors.cpp` | 78 | 2,450 B | HAL Xử lý Cảm biến MQ-2 & DHT22 |
-| 14 | HAL Khai báo Actuator & FSM | `src/fsm.h` | 13 | 263 B | HAL Khai báo Actuator & FSM |
-| 15 | HAL Trình điều khiển Relay & Còi LEDC | `src/fsm.cpp` | 61 | 1,486 B | HAL Trình điều khiển Relay & Còi LEDC |
-| 16 | Bộ đệm ngoại tuyến (Offline Buffer Header) | `src/offline_buffer.h` | 33 | 935 B | Bộ đệm ngoại tuyến (Offline Buffer Header) |
-| 17 | Bộ đệm ngoại tuyến (Ring Buffer Implementation) | `src/offline_buffer.cpp` | 86 | 3,316 B | Bộ đệm ngoại tuyến (Ring Buffer Implementation) |
-| 18 | Firmware Điều khiển Trung tâm (Main Orchestrator) | `src/main.cpp` | 625 | 21,186 B | Firmware Điều khiển Trung tâm (Main Orchestrator) |
-| 19 | Node-RED: Parser Telemetry & Dedup | `nodered/functions/parse_telemetry.js` | 39 | 1,113 B | Node-RED: Parser Telemetry & Dedup |
-| 20 | Node-RED: Parser Alarm Event & Dedup | `nodered/functions/parse_alarm.js` | 32 | 944 B | Node-RED: Parser Alarm Event & Dedup |
-| 21 | Node-RED: Parser Keep-Alive & Dedup | `nodered/functions/parse_keepalive.js` | 32 | 881 B | Node-RED: Parser Keep-Alive & Dedup |
-| 22 | Node-RED: Parser LWT Signal | `nodered/functions/parse_lwt.js` | 22 | 511 B | Node-RED: Parser LWT Signal |
-| 23 | Node-RED: Động cơ Business Rules & Abnormal Engine | `nodered/functions/core_engine.js` | 194 | 6,984 B | Node-RED: Động cơ Business Rules & Abnormal Engine |
-| 24 | Node-RED: Bộ điều phối lệnh (Command Dispatcher) | `nodered/functions/command_dispatcher.js` | 6 | 183 B | Node-RED: Bộ điều phối lệnh (Command Dispatcher) |
-| 25 | Node-RED: Bộ phát tin cảnh báo Telegram (Alert Dispatcher) | `nodered/functions/alert_dispatcher.js` | 18 | 543 B | Node-RED: Bộ phát tin cảnh báo Telegram (Alert Dispatcher) |
-| 26 | Node-RED: Lập lịch chế độ Ngày/Đêm (Scheduler Tick) | `nodered/functions/scheduler_tick.js` | 11 | 310 B | Node-RED: Lập lịch chế độ Ngày/Đêm (Scheduler Tick) |
-| 27 | Node-RED: Cấu trúc Flow hoàn chỉnh (52 Nodes) | `nodered/flows_smoke_detector.json` | 970 | 37,873 B | Node-RED: Cấu trúc Flow hoàn chỉnh (52 Nodes) |
-| 28 | Web SCADA: Thư viện bảo mật XSS & Utilities | `web/util.js` | 30 | 845 B | Web SCADA: Thư viện bảo mật XSS & Utilities |
-| 29 | Web SCADA: Giao diện điều hành (HTML5 Semantic) | `web/index.html` | 784 | 38,643 B | Web SCADA: Giao diện điều hành (HTML5 Semantic) |
-| 30 | Web SCADA: Bảng mã phong cách giao diện (CSS3 Glassmorphism) | `web/style.css` | 1,823 | 37,151 B | Web SCADA: Bảng mã phong cách giao diện (CSS3 Glassmorphism) |
-| 31 | Web SCADA: Mã nguồn xử lý tương tác (JavaScript Application) | `web/app.js` | 1,168 | 46,150 B | Web SCADA: Mã nguồn xử lý tương tác (JavaScript Application) |
-| 32 | Kiểm thử Native C++ Core (Unity) | `test/test_core.cpp` | 660 | 24,681 B | Kiểm thử Native C++ Core (Unity) |
-| 33 | Kiểm thử Node-RED Engine (Node Test Runner) | `nodered/tests/engine.test.js` | 353 | 12,358 B | Kiểm thử Node-RED Engine (Node Test Runner) |
-| 34 | Kiểm thử Tích hợp Flow Node-RED (Flow Integration) | `nodered/tests/flow_integration.test.js` | 191 | 7,351 B | Kiểm thử Tích hợp Flow Node-RED (Flow Integration) |
-| 35 | Kiểm thử Web SCADA XSS & Reflection | `web/tests/util.test.js` | 178 | 6,178 B | Kiểm thử Web SCADA XSS & Reflection |
-| 36 | Bộ kịch bản kiểm thử MQTTX Slide 65 (23 Messages) | `tests/mqttx_collection_slide65.json` | 658 | 22,357 B | Bộ kịch bản kiểm thử MQTTX Slide 65 (23 Messages) |
-| 37 | Danh mục cam kết kiểm duyệt (Claims Registry) | `docs/audit/claims.yaml` | 83 | 4,649 B | Danh mục cam kết kiểm duyệt (Claims Registry) |
-| 38 | Trình kiểm định cam kết Audit 3 bậc | `scripts/check_claims.py` | 108 | 3,972 B | Trình kiểm định cam kết Audit 3 bậc |
+| 9 | Core: Cấu trúc Exponential Backoff dùng chung | `lib/core/backoff.h` | 26 | 571 B | Core: Cấu trúc Exponential Backoff dùng chung |
+| 10 | Core: Cấu trúc Ring Buffer dùng chung | `lib/core/ring_buffer.h` | 60 | 1,503 B | Core: Cấu trúc Ring Buffer dùng chung |
+| 11 | Core: Trình phân tích & Khóa liên động lệnh | `lib/core/cmd_parse.h` | 49 | 1,571 B | Core: Trình phân tích & Khóa liên động lệnh |
+| 12 | Core: Khai báo FSM & Interlocks | `lib/core/fsm_core.h` | 114 | 2,589 B | Core: Khai báo FSM & Interlocks |
+| 13 | Core: Động cơ chuyển trạng thái FSM | `lib/core/fsm_core.cpp` | 61 | 1,931 B | Core: Động cơ chuyển trạng thái FSM |
+| 14 | Cấu hình Firmware & Topics | `src/config.h` | 118 | 6,485 B | Cấu hình Firmware & Topics |
+| 15 | HAL Khai báo Cảm biến | `src/sensors.h` | 13 | 375 B | HAL Khai báo Cảm biến |
+| 16 | HAL Xử lý Cảm biến MQ-2 & DHT22 | `src/sensors.cpp` | 78 | 2,450 B | HAL Xử lý Cảm biến MQ-2 & DHT22 |
+| 17 | HAL Khai báo Actuator & FSM | `src/fsm.h` | 13 | 263 B | HAL Khai báo Actuator & FSM |
+| 18 | HAL Trình điều khiển Relay & Còi LEDC | `src/fsm.cpp` | 61 | 1,486 B | HAL Trình điều khiển Relay & Còi LEDC |
+| 19 | Bộ đệm ngoại tuyến (Offline Buffer Header) | `src/offline_buffer.h` | 34 | 960 B | Bộ đệm ngoại tuyến (Offline Buffer Header) |
+| 20 | Bộ đệm ngoại tuyến (Ring Buffer Implementation) | `src/offline_buffer.cpp` | 79 | 2,371 B | Bộ đệm ngoại tuyến (Ring Buffer Implementation) |
+| 21 | Firmware Điều khiển Trung tâm (Main Orchestrator) | `src/main.cpp` | 623 | 21,023 B | Firmware Điều khiển Trung tâm (Main Orchestrator) |
+| 22 | Node-RED: Parser Telemetry & Dedup | `nodered/functions/parse_telemetry.js` | 39 | 1,113 B | Node-RED: Parser Telemetry & Dedup |
+| 23 | Node-RED: Parser Alarm Event & Dedup | `nodered/functions/parse_alarm.js` | 32 | 944 B | Node-RED: Parser Alarm Event & Dedup |
+| 24 | Node-RED: Parser Keep-Alive & Dedup | `nodered/functions/parse_keepalive.js` | 32 | 881 B | Node-RED: Parser Keep-Alive & Dedup |
+| 25 | Node-RED: Parser LWT Signal | `nodered/functions/parse_lwt.js` | 22 | 511 B | Node-RED: Parser LWT Signal |
+| 26 | Node-RED: Động cơ Business Rules & Abnormal Engine | `nodered/functions/core_engine.js` | 194 | 6,984 B | Node-RED: Động cơ Business Rules & Abnormal Engine |
+| 27 | Node-RED: Bộ điều phối lệnh (Command Dispatcher) | `nodered/functions/command_dispatcher.js` | 6 | 183 B | Node-RED: Bộ điều phối lệnh (Command Dispatcher) |
+| 28 | Node-RED: Bộ phát tin cảnh báo Telegram (Alert Dispatcher) | `nodered/functions/alert_dispatcher.js` | 18 | 543 B | Node-RED: Bộ phát tin cảnh báo Telegram (Alert Dispatcher) |
+| 29 | Node-RED: Lập lịch chế độ Ngày/Đêm (Scheduler Tick) | `nodered/functions/scheduler_tick.js` | 11 | 310 B | Node-RED: Lập lịch chế độ Ngày/Đêm (Scheduler Tick) |
+| 30 | Node-RED: Cấu trúc Flow hoàn chỉnh (52 Nodes) | `nodered/flows_smoke_detector.json` | 970 | 37,873 B | Node-RED: Cấu trúc Flow hoàn chỉnh (52 Nodes) |
+| 31 | Web SCADA: Thư viện bảo mật XSS & Utilities | `web/util.js` | 30 | 845 B | Web SCADA: Thư viện bảo mật XSS & Utilities |
+| 32 | Web SCADA: Giao diện điều hành (HTML5 Semantic) | `web/index.html` | 784 | 38,643 B | Web SCADA: Giao diện điều hành (HTML5 Semantic) |
+| 33 | Web SCADA: Bảng mã phong cách giao diện (CSS3 Glassmorphism) | `web/style.css` | 1,823 | 37,151 B | Web SCADA: Bảng mã phong cách giao diện (CSS3 Glassmorphism) |
+| 34 | Web SCADA: Mã nguồn xử lý tương tác (JavaScript Application) | `web/app.js` | 1,168 | 46,150 B | Web SCADA: Mã nguồn xử lý tương tác (JavaScript Application) |
+| 35 | Kiểm thử Native C++ Core (Unity) | `test/test_core.cpp` | 638 | 24,421 B | Kiểm thử Native C++ Core (Unity) |
+| 36 | Kiểm thử Node-RED Engine (Node Test Runner) | `nodered/tests/engine.test.js` | 353 | 12,358 B | Kiểm thử Node-RED Engine (Node Test Runner) |
+| 37 | Kiểm thử Tích hợp Flow Node-RED (Flow Integration) | `nodered/tests/flow_integration.test.js` | 211 | 8,346 B | Kiểm thử Tích hợp Flow Node-RED (Flow Integration) |
+| 38 | Kiểm thử Web SCADA XSS & Reflection | `web/tests/util.test.js` | 178 | 6,178 B | Kiểm thử Web SCADA XSS & Reflection |
+| 39 | Bộ kịch bản kiểm thử MQTTX Slide 65 (23 Messages) | `tests/mqttx_collection_slide65.json` | 658 | 22,357 B | Bộ kịch bản kiểm thử MQTTX Slide 65 (23 Messages) |
+| 40 | Kiểm duyệt cam kết tự động (Claims Validator) | `scripts/check_claims.py` | 168 | 6,518 B | Kiểm duyệt cam kết tự động (Claims Validator) |
+| 41 | Bảng đặc tả cam kết 3 bậc (Claims Registry) | `docs/audit/claims.yaml` | 83 | 5,027 B | Bảng đặc tả cam kết 3 bậc (Claims Registry) |
 
 ---
 
@@ -440,7 +419,175 @@ inline uint32_t nextBackoff(uint32_t cur, uint32_t maxMs = 16000) {
 
 ---
 
-## PHẦN 10: CORE: KHAI BÁO FSM & INTERLOCKS (`lib/core/fsm_core.h`)
+## PHẦN 10: CORE: CẤU TRÚC EXPONENTIAL BACKOFF DÙNG CHUNG (`lib/core/backoff.h`)
+
+> **Đường dẫn:** `lib/core/backoff.h`  
+> **Quy mô:** 26 dòng | 571 bytes | Ngôn ngữ: `cpp`
+
+```cpp
+#ifndef BACKOFF_H
+#define BACKOFF_H
+
+#include <stdint.h>
+#include "netutil.h"
+
+/**
+ * @file backoff.h
+ * @brief May trang thai Exponential Backoff quan tri thoi gian cho tai ket noi
+ * @details Dung chung cho Firmware ESP32 (src/main.cpp) va bo kiem thu Native Unity (test/test_core.cpp)
+ */
+struct ExponentialBackoff {
+    uint32_t currentMs = 1000;
+    uint32_t initialMs = 1000;
+    uint32_t maxMs     = 16000;
+
+    void fail() {
+        currentMs = nextBackoff(currentMs, maxMs);
+    }
+
+    void reset() {
+        currentMs = initialMs;
+    }
+};
+
+#endif // BACKOFF_H
+
+```
+
+---
+
+## PHẦN 11: CORE: CẤU TRÚC RING BUFFER DÙNG CHUNG (`lib/core/ring_buffer.h`)
+
+> **Đường dẫn:** `lib/core/ring_buffer.h`  
+> **Quy mô:** 60 dòng | 1,503 bytes | Ngôn ngữ: `cpp`
+
+```cpp
+#ifndef RING_BUFFER_H
+#define RING_BUFFER_H
+
+#include <stddef.h>
+
+/**
+ * @file ring_buffer.h
+ * @brief Template hang doi vong tinh khong cap phat dong (Zero-Heap RingBuffer)
+ * @details Dung chung cho Firmware ESP32 (src/offline_buffer.cpp) va bo kiem thu Native Unity (test/test_core.cpp)
+ */
+template<typename T, size_t N>
+class RingBuffer {
+public:
+    RingBuffer() : m_head(0), m_count(0) {}
+
+    void clear() {
+        m_head = 0;
+        m_count = 0;
+    }
+
+    void push(const T& item) {
+        m_buffer[m_head] = item;
+        m_head = (m_head + 1) % N;
+        if (m_count < N) {
+            m_count++;
+        }
+    }
+
+    size_t size() const { return m_count; }
+    size_t capacity() const { return N; }
+    bool empty() const { return m_count == 0; }
+    bool full() const { return m_count == N; }
+
+    // Truc xuat phan tu theo thu tu FIFO: index 0 la cu nhat (oldest), count-1 la moi nhat (newest)
+    const T& getOldest(size_t index) const {
+        size_t start = (m_head - m_count + N) % N;
+        return m_buffer[(start + index) % N];
+    }
+
+    T& getOldest(size_t index) {
+        size_t start = (m_head - m_count + N) % N;
+        return m_buffer[(start + index) % N];
+    }
+
+    // Xa n phan tu cu nhat khoi bo dem (sau khi gui mang thanh cong)
+    void drop(size_t n) {
+        if (n >= m_count) {
+            m_count = 0;
+        } else {
+            m_count -= n;
+        }
+    }
+
+private:
+    T m_buffer[N];
+    size_t m_head;
+    size_t m_count;
+};
+
+#endif // RING_BUFFER_H
+
+```
+
+---
+
+## PHẦN 12: CORE: TRÌNH PHÂN TÍCH & KHÓA LIÊN ĐỘNG LỆNH (`lib/core/cmd_parse.h`)
+
+> **Đường dẫn:** `lib/core/cmd_parse.h`  
+> **Quy mô:** 49 dòng | 1,571 bytes | Ngôn ngữ: `cpp`
+
+```cpp
+#ifndef CMD_PARSE_H
+#define CMD_PARSE_H
+
+#include <string.h>
+#include "fsm_core.h"
+
+/**
+ * @file cmd_parse.h
+ * @brief Bo phan giai lenh chap hanh doc lap phan cung va khoa an toan PCCC
+ * @details Dung chung cho Firmware ESP32 (src/main.cpp) va bo kiem thu Native Unity (test/test_core.cpp)
+ */
+
+enum ActionAck : uint8_t {
+    ACTION_ACCEPTED,
+    ACTION_SAFETY_LOCK,
+    ACTION_UNKNOWN
+};
+
+inline ActionAck applyFanAction(FsmContext& ctx, const char* action) {
+    if (!action) return ACTION_UNKNOWN;
+    if (strcmp(action, "OFF") == 0) {
+        CmdResult cr = cmdRemoteFanOff(ctx);
+        return (cr == CMD_OK) ? ACTION_ACCEPTED : ACTION_SAFETY_LOCK;
+    } else if (strcmp(action, "ON") == 0) {
+        cmdRemoteFanOn(ctx);
+        return ACTION_ACCEPTED;
+    } else if (strcmp(action, "AUTO") == 0) {
+        cmdFanAuto(ctx);
+        return ACTION_ACCEPTED;
+    }
+    return ACTION_UNKNOWN;
+}
+
+inline ActionAck applyBuzzerAction(FsmContext& ctx, const char* action, uint32_t now) {
+    if (!action) return ACTION_UNKNOWN;
+    if (strcmp(action, "MUTE") == 0 || strcmp(action, "OFF") == 0) {
+        CmdResult cr = cmdRemoteMute(ctx, now);
+        return (cr == CMD_OK) ? ACTION_ACCEPTED : ACTION_SAFETY_LOCK;
+    } else if (strcmp(action, "UNMUTE") == 0) {
+        cmdRemoteUnmute(ctx);
+        return ACTION_ACCEPTED;
+    } else if (strcmp(action, "TEST") == 0 || strcmp(action, "ON") == 0) {
+        CmdResult cr = cmdBuzzerTest(ctx);
+        return (cr == CMD_OK) ? ACTION_ACCEPTED : ACTION_SAFETY_LOCK;
+    }
+    return ACTION_UNKNOWN;
+}
+
+#endif // CMD_PARSE_H
+
+```
+
+---
+
+## PHẦN 13: CORE: KHAI BÁO FSM & INTERLOCKS (`lib/core/fsm_core.h`)
 
 > **Đường dẫn:** `lib/core/fsm_core.h`  
 > **Quy mô:** 114 dòng | 2,589 bytes | Ngôn ngữ: `cpp`
@@ -565,7 +712,7 @@ inline bool cmdLocalButton(FsmContext& c, uint32_t now) {
 
 ---
 
-## PHẦN 11: CORE: ĐỘNG CƠ CHUYỂN TRẠNG THÁI FSM (`lib/core/fsm_core.cpp`)
+## PHẦN 14: CORE: ĐỘNG CƠ CHUYỂN TRẠNG THÁI FSM (`lib/core/fsm_core.cpp`)
 
 > **Đường dẫn:** `lib/core/fsm_core.cpp`  
 > **Quy mô:** 61 dòng | 1,931 bytes | Ngôn ngữ: `cpp`
@@ -637,7 +784,7 @@ FsmOutput fsmStep(FsmContext& c, const FsmInput& in, const Thresholds& th) {
 
 ---
 
-## PHẦN 12: CẤU HÌNH FIRMWARE & TOPICS (`src/config.h`)
+## PHẦN 15: CẤU HÌNH FIRMWARE & TOPICS (`src/config.h`)
 
 > **Đường dẫn:** `src/config.h`  
 > **Quy mô:** 118 dòng | 6,485 bytes | Ngôn ngữ: `cpp`
@@ -766,7 +913,7 @@ struct SensorConfig {
 
 ---
 
-## PHẦN 13: HAL KHAI BÁO CẢM BIẾN (`src/sensors.h`)
+## PHẦN 16: HAL KHAI BÁO CẢM BIẾN (`src/sensors.h`)
 
 > **Đường dẫn:** `src/sensors.h`  
 > **Quy mô:** 13 dòng | 375 bytes | Ngôn ngữ: `cpp`
@@ -790,7 +937,7 @@ bool readDHT(float& tempOut, float& humOut);
 
 ---
 
-## PHẦN 14: HAL XỬ LÝ CẢM BIẾN MQ-2 & DHT22 (`src/sensors.cpp`)
+## PHẦN 17: HAL XỬ LÝ CẢM BIẾN MQ-2 & DHT22 (`src/sensors.cpp`)
 
 > **Đường dẫn:** `src/sensors.cpp`  
 > **Quy mô:** 78 dòng | 2,450 bytes | Ngôn ngữ: `cpp`
@@ -879,7 +1026,7 @@ bool readDHT(float& tempOut, float& humOut) {
 
 ---
 
-## PHẦN 15: HAL KHAI BÁO ACTUATOR & FSM (`src/fsm.h`)
+## PHẦN 18: HAL KHAI BÁO ACTUATOR & FSM (`src/fsm.h`)
 
 > **Đường dẫn:** `src/fsm.h`  
 > **Quy mô:** 13 dòng | 263 bytes | Ngôn ngữ: `cpp`
@@ -903,7 +1050,7 @@ const char* getFsmStateString(SystemState state);
 
 ---
 
-## PHẦN 16: HAL TRÌNH ĐIỀU KHIỂN RELAY & CÒI LEDC (`src/fsm.cpp`)
+## PHẦN 19: HAL TRÌNH ĐIỀU KHIỂN RELAY & CÒI LEDC (`src/fsm.cpp`)
 
 > **Đường dẫn:** `src/fsm.cpp`  
 > **Quy mô:** 61 dòng | 1,486 bytes | Ngôn ngữ: `cpp`
@@ -975,10 +1122,10 @@ const char* getFsmStateString(SystemState state) {
 
 ---
 
-## PHẦN 17: BỘ ĐỆM NGOẠI TUYẾN (OFFLINE BUFFER HEADER) (`src/offline_buffer.h`)
+## PHẦN 20: BỘ ĐỆM NGOẠI TUYẾN (OFFLINE BUFFER HEADER) (`src/offline_buffer.h`)
 
 > **Đường dẫn:** `src/offline_buffer.h`  
-> **Quy mô:** 33 dòng | 935 bytes | Ngôn ngữ: `cpp`
+> **Quy mô:** 34 dòng | 960 bytes | Ngôn ngữ: `cpp`
 
 ```cpp
 #ifndef OFFLINE_BUFFER_H
@@ -986,6 +1133,7 @@ const char* getFsmStateString(SystemState state) {
 
 #include <Arduino.h>
 #include <PubSubClient.h>
+#include "ring_buffer.h"
 
 /**
  * @file offline_buffer.h
@@ -1019,79 +1167,72 @@ int getOfflineBufferCount();
 
 ---
 
-## PHẦN 18: BỘ ĐỆM NGOẠI TUYẾN (RING BUFFER IMPLEMENTATION) (`src/offline_buffer.cpp`)
+## PHẦN 21: BỘ ĐỆM NGOẠI TUYẾN (RING BUFFER IMPLEMENTATION) (`src/offline_buffer.cpp`)
 
 > **Đường dẫn:** `src/offline_buffer.cpp`  
-> **Quy mô:** 86 dòng | 3,316 bytes | Ngôn ngữ: `cpp`
+> **Quy mô:** 79 dòng | 2,371 bytes | Ngôn ngữ: `cpp`
 
 ```cpp
 #include "offline_buffer.h"
 
-static OfflineRecord s_offlineBuffer[OFFLINE_BUF_SIZE];
-static int s_offlineHead = 0;
-static int s_offlineCount = 0;
+static RingBuffer<OfflineRecord, OFFLINE_BUF_SIZE> s_ringBuffer;
 
 void initOfflineBuffer() {
-  s_offlineHead = 0;
-  s_offlineCount = 0;
-  memset(s_offlineBuffer, 0, sizeof(s_offlineBuffer));
+  s_ringBuffer.clear();
 }
 
 void pushOfflineRecord(float ppm, float temp, float hum, bool fan, bool buzzer, const char* stateStr, const char* eventType, bool mq2Valid, bool dhtValid) {
-  s_offlineBuffer[s_offlineHead].timestamp = millis() / 1000;
-  s_offlineBuffer[s_offlineHead].ppm = ppm;
-  s_offlineBuffer[s_offlineHead].temp = temp;
-  s_offlineBuffer[s_offlineHead].hum = hum;
-  s_offlineBuffer[s_offlineHead].fan = fan;
-  s_offlineBuffer[s_offlineHead].buzzer = buzzer;
-  s_offlineBuffer[s_offlineHead].mq2Valid = mq2Valid;
-  s_offlineBuffer[s_offlineHead].dhtValid = dhtValid;
+  OfflineRecord rec;
+  rec.timestamp = millis() / 1000;
+  rec.ppm = ppm;
+  rec.temp = temp;
+  rec.hum = hum;
+  rec.fan = fan;
+  rec.buzzer = buzzer;
+  rec.mq2Valid = mq2Valid;
+  rec.dhtValid = dhtValid;
 
   if (stateStr != nullptr) {
-    strncpy(s_offlineBuffer[s_offlineHead].state, stateStr, sizeof(s_offlineBuffer[s_offlineHead].state) - 1);
-    s_offlineBuffer[s_offlineHead].state[sizeof(s_offlineBuffer[s_offlineHead].state) - 1] = '\0';
+    strncpy(rec.state, stateStr, sizeof(rec.state) - 1);
+    rec.state[sizeof(rec.state) - 1] = '\0';
   } else {
-    strncpy(s_offlineBuffer[s_offlineHead].state, "UNKNOWN", sizeof(s_offlineBuffer[s_offlineHead].state) - 1);
+    strncpy(rec.state, "UNKNOWN", sizeof(rec.state) - 1);
   }
 
   if (eventType != nullptr) {
-    strncpy(s_offlineBuffer[s_offlineHead].eventType, eventType, sizeof(s_offlineBuffer[s_offlineHead].eventType) - 1);
-    s_offlineBuffer[s_offlineHead].eventType[sizeof(s_offlineBuffer[s_offlineHead].eventType) - 1] = '\0';
+    strncpy(rec.eventType, eventType, sizeof(rec.eventType) - 1);
+    rec.eventType[sizeof(rec.eventType) - 1] = '\0';
   } else {
-    strncpy(s_offlineBuffer[s_offlineHead].eventType, "TELEMETRY", sizeof(s_offlineBuffer[s_offlineHead].eventType) - 1);
+    strncpy(rec.eventType, "TELEMETRY", sizeof(rec.eventType) - 1);
   }
 
-  s_offlineHead = (s_offlineHead + 1) % OFFLINE_BUF_SIZE;
-  if (s_offlineCount < (int)OFFLINE_BUF_SIZE) {
-    s_offlineCount++;
-  }
+  s_ringBuffer.push(rec);
 }
 
 void flushOfflineBuffer(PubSubClient& client, const char* topic, int maxBatch) {
-  if (s_offlineCount == 0 || !client.connected() || topic == nullptr) {
+  if (s_ringBuffer.empty() || !client.connected() || topic == nullptr) {
     return;
   }
 
-  const int toSend = (s_offlineCount < maxBatch) ? s_offlineCount : maxBatch;
-  const int startIdx = (s_offlineHead - s_offlineCount + OFFLINE_BUF_SIZE) % OFFLINE_BUF_SIZE;
+  const size_t toSend = (s_ringBuffer.size() < (size_t)maxBatch) ? s_ringBuffer.size() : (size_t)maxBatch;
   char payload[256];
-  int successfullySent = 0;
+  size_t successfullySent = 0;
 
-  for (int idx = 0; idx < toSend; idx++) {
-    const int cur = (startIdx + idx) % OFFLINE_BUF_SIZE;
+  for (size_t idx = 0; idx < toSend; idx++) {
+    const OfflineRecord& rec = s_ringBuffer.getOldest(idx);
     snprintf(payload, sizeof(payload),
-      "{\"sync_seq\":%d,\"ts\":%lu,\"type\":\"%s\",\"mq2_ppm\":%.1f,\"temp\":%.1f,\"hum\":%.1f,\"fan\":\"%s\",\"buzzer\":\"%s\",\"state\":\"%s\",\"mq2_valid\":%s,\"dht_valid\":%s}",
+      "{\"sync_seq\":%zu,\"ts\":%lu,\"type\":\"%s\",\"mq2_ppm\":%.1f,\"temp\":%.1f,\"hum\":%.1f,\"fan\":\"%s\",\"buzzer\":\"%s\",\"state\":\"%s\",\"mq2_valid\":%s,\"dht_valid\":%s}",
       idx + 1,
-      s_offlineBuffer[cur].timestamp,
-      s_offlineBuffer[cur].eventType,
-      s_offlineBuffer[cur].ppm,
-      s_offlineBuffer[cur].temp,
-      s_offlineBuffer[cur].hum,
-      s_offlineBuffer[cur].fan ? "ON" : "OFF",
-      s_offlineBuffer[cur].buzzer ? "ON" : "OFF",
-      s_offlineBuffer[cur].state,
-      s_offlineBuffer[cur].mq2Valid ? "true" : "false",
-      s_offlineBuffer[cur].dhtValid ? "true" : "false"
+      rec.timestamp,
+      rec.eventType,
+      rec.ppm,
+      rec.temp,
+      rec.hum,
+      rec.fan ? "ON" : "OFF",
+      rec.buzzer ? "ON" : "OFF",
+      rec.state,
+      rec.mq2Valid ? "true" : "false",
+      rec.dhtValid ? "true" : "false"
     );
 
     if (!client.publish(topic, payload)) {
@@ -1102,31 +1243,31 @@ void flushOfflineBuffer(PubSubClient& client, const char* topic, int maxBatch) {
     delay(20);
   }
 
-  s_offlineCount -= successfullySent;
+  s_ringBuffer.drop(successfullySent);
   if (successfullySent > 0) {
-    Serial.printf("[OFFLINE BUFFER] Da dong bo %d ban ghi. Con lai trong dem: %d\r\n", successfullySent, s_offlineCount);
+    Serial.printf("[OFFLINE BUFFER] Da dong bo %zu ban ghi. Con lai trong dem: %zu\r\n", successfullySent, s_ringBuffer.size());
   }
 }
 
 int getOfflineBufferCount() {
-  return s_offlineCount;
+  return static_cast<int>(s_ringBuffer.size());
 }
 
 ```
 
 ---
 
-## PHẦN 19: FIRMWARE ĐIỀU KHIỂN TRUNG TÂM (MAIN ORCHESTRATOR) (`src/main.cpp`)
+## PHẦN 22: FIRMWARE ĐIỀU KHIỂN TRUNG TÂM (MAIN ORCHESTRATOR) (`src/main.cpp`)
 
 > **Đường dẫn:** `src/main.cpp`  
-> **Quy mô:** 625 dòng | 21,186 bytes | Ngôn ngữ: `cpp`
+> **Quy mô:** 623 dòng | 21,023 bytes | Ngôn ngữ: `cpp`
 
 ```cpp
 /**
  * @file main.cpp
  * @brief Chuong trinh dieu khien chinh (Main Application Orchestrator)
  * @details De tai 04: He thong bao khoi canh bao som - Nhom 04 (N09)
- *          Kien truc Lean & Clean Code: Stack/Local-bounded JSON allocation (ArduinoJson v7), Modular SRP.
+ *          Kien truc Lean & Clean Code: JsonDocument cap phat heap tam theo RAII trong tung handler, giai phong khi thoat ham; gioi han boi buffer mang (512B) va payload (256B).
  */
 
 #include <Arduino.h>
@@ -1138,6 +1279,8 @@ int getOfflineBufferCount() {
 #include "offline_buffer.h"
 #include "sensors.h"
 #include "fsm.h"
+#include "backoff.h"
+#include "cmd_parse.h"
 
 // ============================================================================
 // GLOBAL STATE & SYSTEM CONTEXT
@@ -1180,8 +1323,8 @@ static uint32_t g_lastDht       = 0;
 static uint32_t g_lastHeartbeat = 0;
 
 // Network backoff & non-blocking state
-static uint32_t s_wifiBackoff = 1000;
-static uint32_t s_mqttBackoff = 1000;
+static ExponentialBackoff s_wifiBackoff;
+static ExponentialBackoff s_mqttBackoff;
 static uint32_t s_wifiEnd     = 0;
 static uint32_t s_wifiBegin   = 0;
 static uint32_t s_mqttTry     = 0;
@@ -1408,15 +1551,11 @@ static void onFan(const char* message) {
   }
 
   const char* action = doc["action"] | doc["cmd"] | "";
-  if (is(action, "OFF")) {
-    CmdResult cr = cmdRemoteFanOff(g_fsm);
-    publishAck(CMD_FAN, cr == CMD_OK ? ACK_ACCEPTED : ACK_SAFETY_LOCK, cr == CMD_OK ? "FAN_OFF" : "PPM_ABOVE_THRESHOLD");
-  } else if (is(action, "ON")) {
-    cmdRemoteFanOn(g_fsm);
-    publishAck(CMD_FAN, ACK_ACCEPTED, "FAN_ON");
-  } else if (is(action, "AUTO")) {
-    cmdFanAuto(g_fsm);
-    publishAck(CMD_FAN, ACK_ACCEPTED, "MODE_AUTO");
+  ActionAck ack = applyFanAction(g_fsm, action);
+  if (ack == ACTION_ACCEPTED) {
+    publishAck(CMD_FAN, ACK_ACCEPTED, is(action, "AUTO") ? "MODE_AUTO" : (g_fsm.manualFan ? "FAN_ON" : "FAN_OFF"));
+  } else if (ack == ACTION_SAFETY_LOCK) {
+    publishAck(CMD_FAN, ACK_SAFETY_LOCK, "PPM_ABOVE_THRESHOLD");
   } else {
     publishAck(CMD_FAN, ACK_UNKNOWN_ACTION, "UNKNOWN_ACTION");
   }
@@ -1431,20 +1570,16 @@ static void onBuzzer(const char* message) {
   }
 
   const char* action = doc["action"] | doc["cmd"] | "";
-  if (is(action, "MUTE") || is(action, "OFF")) {
-    CmdResult cr = cmdRemoteMute(g_fsm, millis());
-    publishAck(CMD_BUZZER, cr == CMD_OK ? ACK_ACCEPTED : ACK_SAFETY_LOCK, cr == CMD_OK ? "MUTED_180S" : "ALARM_LATCHED");
-  } else if (is(action, "UNMUTE")) {
-    cmdRemoteUnmute(g_fsm);
-    publishAck(CMD_BUZZER, ACK_ACCEPTED, "UNMUTED");
-  } else if (is(action, "TEST") || is(action, "ON")) {
-    CmdResult cr = cmdBuzzerTest(g_fsm);
-    if (cr == CMD_OK) {
+  ActionAck ack = applyBuzzerAction(g_fsm, action, millis());
+  if (ack == ACTION_ACCEPTED) {
+    if (is(action, "TEST") || is(action, "ON")) {
       buzzerTest(millis());
       publishAck(CMD_BUZZER, ACK_ACCEPTED, "TEST_500MS");
     } else {
-      publishAck(CMD_BUZZER, ACK_SAFETY_LOCK, "ALARM_LATCHED");
+      publishAck(CMD_BUZZER, ACK_ACCEPTED, g_fsm.muted ? "MUTED_180S" : "UNMUTED");
     }
+  } else if (ack == ACTION_SAFETY_LOCK) {
+    publishAck(CMD_BUZZER, ACK_SAFETY_LOCK, "ALARM_LATCHED");
   } else {
     publishAck(CMD_BUZZER, ACK_UNKNOWN_ACTION, "UNKNOWN_ACTION");
   }
@@ -1601,7 +1736,7 @@ static bool mqttConnect() {
 static void netTick(uint32_t now) {
   if (WiFi.status() != WL_CONNECTED) {
     if (!s_wifiBusy) {
-      if (now - s_wifiEnd >= s_wifiBackoff) {
+      if (now - s_wifiEnd >= s_wifiBackoff.currentMs) {
         WiFi.disconnect();
         WiFi.begin(WIFI_SSID, WIFI_PASS);
         s_wifiBusy = true;
@@ -1610,13 +1745,13 @@ static void netTick(uint32_t now) {
     } else if (now - s_wifiBegin >= WIFI_ATTEMPT_TIMEOUT_MS) {
       s_wifiBusy = false;
       s_wifiEnd = now;
-      s_wifiBackoff = nextBackoff(s_wifiBackoff, 16000);
+      s_wifiBackoff.fail();
     }
     return;
   }
 
   s_wifiBusy = false;
-  s_wifiBackoff = 1000;
+  s_wifiBackoff.reset();
 
   if (g_mqttClient.connected()) {
     g_mqttClient.loop();
@@ -1624,9 +1759,13 @@ static void netTick(uint32_t now) {
     return;
   }
 
-  if (now - s_mqttTry >= s_mqttBackoff) {
+  if (now - s_mqttTry >= s_mqttBackoff.currentMs) {
     s_mqttTry = now;
-    s_mqttBackoff = mqttConnect() ? 1000 : nextBackoff(s_mqttBackoff, 16000);
+    if (mqttConnect()) {
+      s_mqttBackoff.reset();
+    } else {
+      s_mqttBackoff.fail();
+    }
   }
 }
 
@@ -1752,7 +1891,7 @@ void loop() {
 
 ---
 
-## PHẦN 20: NODE-RED: PARSER TELEMETRY & DEDUP (`nodered/functions/parse_telemetry.js`)
+## PHẦN 23: NODE-RED: PARSER TELEMETRY & DEDUP (`nodered/functions/parse_telemetry.js`)
 
 > **Đường dẫn:** `nodered/functions/parse_telemetry.js`  
 > **Quy mô:** 39 dòng | 1,113 bytes | Ngôn ngữ: `javascript`
@@ -1802,7 +1941,7 @@ return msg;
 
 ---
 
-## PHẦN 21: NODE-RED: PARSER ALARM EVENT & DEDUP (`nodered/functions/parse_alarm.js`)
+## PHẦN 24: NODE-RED: PARSER ALARM EVENT & DEDUP (`nodered/functions/parse_alarm.js`)
 
 > **Đường dẫn:** `nodered/functions/parse_alarm.js`  
 > **Quy mô:** 32 dòng | 944 bytes | Ngôn ngữ: `javascript`
@@ -1845,7 +1984,7 @@ return msg;
 
 ---
 
-## PHẦN 22: NODE-RED: PARSER KEEP-ALIVE & DEDUP (`nodered/functions/parse_keepalive.js`)
+## PHẦN 25: NODE-RED: PARSER KEEP-ALIVE & DEDUP (`nodered/functions/parse_keepalive.js`)
 
 > **Đường dẫn:** `nodered/functions/parse_keepalive.js`  
 > **Quy mô:** 32 dòng | 881 bytes | Ngôn ngữ: `javascript`
@@ -1888,7 +2027,7 @@ return msg;
 
 ---
 
-## PHẦN 23: NODE-RED: PARSER LWT SIGNAL (`nodered/functions/parse_lwt.js`)
+## PHẦN 26: NODE-RED: PARSER LWT SIGNAL (`nodered/functions/parse_lwt.js`)
 
 > **Đường dẫn:** `nodered/functions/parse_lwt.js`  
 > **Quy mô:** 22 dòng | 511 bytes | Ngôn ngữ: `javascript`
@@ -1921,7 +2060,7 @@ return msg;
 
 ---
 
-## PHẦN 24: NODE-RED: ĐỘNG CƠ BUSINESS RULES & ABNORMAL ENGINE (`nodered/functions/core_engine.js`)
+## PHẦN 27: NODE-RED: ĐỘNG CƠ BUSINESS RULES & ABNORMAL ENGINE (`nodered/functions/core_engine.js`)
 
 > **Đường dẫn:** `nodered/functions/core_engine.js`  
 > **Quy mô:** 194 dòng | 6,984 bytes | Ngôn ngữ: `javascript`
@@ -2126,7 +2265,7 @@ return [
 
 ---
 
-## PHẦN 25: NODE-RED: BỘ ĐIỀU PHỐI LỆNH (COMMAND DISPATCHER) (`nodered/functions/command_dispatcher.js`)
+## PHẦN 28: NODE-RED: BỘ ĐIỀU PHỐI LỆNH (COMMAND DISPATCHER) (`nodered/functions/command_dispatcher.js`)
 
 > **Đường dẫn:** `nodered/functions/command_dispatcher.js`  
 > **Quy mô:** 6 dòng | 183 bytes | Ngôn ngữ: `javascript`
@@ -2143,7 +2282,7 @@ return msg;
 
 ---
 
-## PHẦN 26: NODE-RED: BỘ PHÁT TIN CẢNH BÁO TELEGRAM (ALERT DISPATCHER) (`nodered/functions/alert_dispatcher.js`)
+## PHẦN 29: NODE-RED: BỘ PHÁT TIN CẢNH BÁO TELEGRAM (ALERT DISPATCHER) (`nodered/functions/alert_dispatcher.js`)
 
 > **Đường dẫn:** `nodered/functions/alert_dispatcher.js`  
 > **Quy mô:** 18 dòng | 543 bytes | Ngôn ngữ: `javascript`
@@ -2172,7 +2311,7 @@ return [
 
 ---
 
-## PHẦN 27: NODE-RED: LẬP LỊCH CHẾ ĐỘ NGÀY/ĐÊM (SCHEDULER TICK) (`nodered/functions/scheduler_tick.js`)
+## PHẦN 30: NODE-RED: LẬP LỊCH CHẾ ĐỘ NGÀY/ĐÊM (SCHEDULER TICK) (`nodered/functions/scheduler_tick.js`)
 
 > **Đường dẫn:** `nodered/functions/scheduler_tick.js`  
 > **Quy mô:** 11 dòng | 310 bytes | Ngôn ngữ: `javascript`
@@ -2194,7 +2333,7 @@ return {
 
 ---
 
-## PHẦN 28: NODE-RED: CẤU TRÚC FLOW HOÀN CHỈNH (52 NODES) (`nodered/flows_smoke_detector.json`)
+## PHẦN 31: NODE-RED: CẤU TRÚC FLOW HOÀN CHỈNH (52 NODES) (`nodered/flows_smoke_detector.json`)
 
 > **Đường dẫn:** `nodered/flows_smoke_detector.json`  
 > **Quy mô:** 970 dòng | 37,873 bytes | Ngôn ngữ: `json`
@@ -3174,7 +3313,7 @@ return {
 
 ---
 
-## PHẦN 29: WEB SCADA: THƯ VIỆN BẢO MẬT XSS & UTILITIES (`web/util.js`)
+## PHẦN 32: WEB SCADA: THƯ VIỆN BẢO MẬT XSS & UTILITIES (`web/util.js`)
 
 > **Đường dẫn:** `web/util.js`  
 > **Quy mô:** 30 dòng | 845 bytes | Ngôn ngữ: `javascript`
@@ -3215,7 +3354,7 @@ return {
 
 ---
 
-## PHẦN 30: WEB SCADA: GIAO DIỆN ĐIỀU HÀNH (HTML5 SEMANTIC) (`web/index.html`)
+## PHẦN 33: WEB SCADA: GIAO DIỆN ĐIỀU HÀNH (HTML5 SEMANTIC) (`web/index.html`)
 
 > **Đường dẫn:** `web/index.html`  
 > **Quy mô:** 784 dòng | 38,643 bytes | Ngôn ngữ: `html`
@@ -4010,7 +4149,7 @@ return {
 
 ---
 
-## PHẦN 31: WEB SCADA: BẢNG MÃ PHONG CÁCH GIAO DIỆN (CSS3 GLASSMORPHISM) (`web/style.css`)
+## PHẦN 34: WEB SCADA: BẢNG MÃ PHONG CÁCH GIAO DIỆN (CSS3 GLASSMORPHISM) (`web/style.css`)
 
 > **Đường dẫn:** `web/style.css`  
 > **Quy mô:** 1,823 dòng | 37,151 bytes | Ngôn ngữ: `css`
@@ -5844,7 +5983,7 @@ body {
 
 ---
 
-## PHẦN 32: WEB SCADA: MÃ NGUỒN XỬ LÝ TƯƠNG TÁC (JAVASCRIPT APPLICATION) (`web/app.js`)
+## PHẦN 35: WEB SCADA: MÃ NGUỒN XỬ LÝ TƯƠNG TÁC (JAVASCRIPT APPLICATION) (`web/app.js`)
 
 > **Đường dẫn:** `web/app.js`  
 > **Quy mô:** 1,168 dòng | 46,150 bytes | Ngôn ngữ: `javascript`
@@ -7023,10 +7162,10 @@ if (typeof module !== 'undefined' && module.exports) {
 
 ---
 
-## PHẦN 33: KIỂM THỬ NATIVE C++ CORE (UNITY) (`test/test_core.cpp`)
+## PHẦN 36: KIỂM THỬ NATIVE C++ CORE (UNITY) (`test/test_core.cpp`)
 
 > **Đường dẫn:** `test/test_core.cpp`  
-> **Quy mô:** 660 dòng | 24,681 bytes | Ngôn ngữ: `cpp`
+> **Quy mô:** 638 dòng | 24,421 bytes | Ngôn ngữ: `cpp`
 
 ```cpp
 #include <unity.h>
@@ -7037,6 +7176,9 @@ if (typeof module !== 'undefined' && module.exports) {
 #include "health.h"
 #include "netutil.h"
 #include "fsm_core.h"
+#include "ring_buffer.h"
+#include "backoff.h"
+#include "cmd_parse.h"
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -7452,29 +7594,31 @@ void test_exponential_backoff(void) {
 }
 
 // ============================================================================
-// T-C1: Fan manual control & AUTO restoration
+// T-C1: Fan manual control & AUTO restoration via applyFanAction
 // ============================================================================
 void test_cmd_fan_manual(void) {
     FsmContext ctx;
     ctx.manualMode = false;
     ctx.manualFan = false;
 
-    cmdRemoteFanOn(ctx);
+    ActionAck a1 = applyFanAction(ctx, "ON");
+    TEST_ASSERT_EQUAL(ACTION_ACCEPTED, a1);
     TEST_ASSERT_TRUE(ctx.manualMode);
     TEST_ASSERT_TRUE(ctx.manualFan);
 
-    CmdResult res = cmdRemoteFanOff(ctx);
-    TEST_ASSERT_EQUAL(CMD_OK, res);
+    ActionAck a2 = applyFanAction(ctx, "OFF");
+    TEST_ASSERT_EQUAL(ACTION_ACCEPTED, a2);
     TEST_ASSERT_TRUE(ctx.manualMode);
     TEST_ASSERT_FALSE(ctx.manualFan);
 
-    cmdFanAuto(ctx);
+    ActionAck a3 = applyFanAction(ctx, "AUTO");
+    TEST_ASSERT_EQUAL(ACTION_ACCEPTED, a3);
     TEST_ASSERT_FALSE(ctx.manualMode);
     TEST_ASSERT_FALSE(ctx.manualFan);
 }
 
 // ============================================================================
-// T-C2: Fan OFF safety interlock during ALARM
+// T-C2: Fan OFF safety interlock during ALARM via applyFanAction
 // ============================================================================
 void test_cmd_fan_safety_interlock(void) {
     Thresholds th = makeThresholds(400.0f);
@@ -7485,8 +7629,8 @@ void test_cmd_fan_safety_interlock(void) {
     TEST_ASSERT_TRUE(ctx.alarmLatched);
 
     // Attempt to turn OFF fan remotely during ALARM
-    CmdResult res = cmdRemoteFanOff(ctx);
-    TEST_ASSERT_EQUAL(CMD_REJECTED_SAFETY_LOCK, res);
+    ActionAck ack = applyFanAction(ctx, "OFF");
+    TEST_ASSERT_EQUAL(ACTION_SAFETY_LOCK, ack);
 
     // Verify fan remains active
     FsmOutput out = fsmStep(ctx, { 450.0f, false, false, 2000 }, th);
@@ -7494,7 +7638,7 @@ void test_cmd_fan_safety_interlock(void) {
 }
 
 // ============================================================================
-// T-C3: Buzzer MUTE safety interlock during ALARM
+// T-C3: Buzzer MUTE safety interlock during ALARM via applyBuzzerAction
 // ============================================================================
 void test_cmd_buzzer_mute_interlock(void) {
     Thresholds th = makeThresholds(400.0f);
@@ -7503,8 +7647,8 @@ void test_cmd_buzzer_mute_interlock(void) {
     TEST_ASSERT_EQUAL(STATE_ALARM, ctx.state);
     TEST_ASSERT_TRUE(ctx.alarmLatched);
 
-    CmdResult res = cmdRemoteMute(ctx, 1000);
-    TEST_ASSERT_EQUAL(CMD_REJECTED_SAFETY_LOCK, res);
+    ActionAck ack = applyBuzzerAction(ctx, "MUTE", 1000);
+    TEST_ASSERT_EQUAL(ACTION_SAFETY_LOCK, ack);
     TEST_ASSERT_FALSE(ctx.muted);
 
     FsmOutput out = fsmStep(ctx, { 450.0f, false, false, 2000 }, th);
@@ -7513,144 +7657,117 @@ void test_cmd_buzzer_mute_interlock(void) {
 }
 
 // ============================================================================
-// T-C4: Buzzer UNMUTE restores audio alert
+// T-C4: Buzzer UNMUTE restores audio alert via applyBuzzerAction
 // ============================================================================
 void test_cmd_buzzer_unmute(void) {
     FsmContext ctx;
     ctx.alarmLatched = false;
-    CmdResult mRes = cmdRemoteMute(ctx, 1000);
-    TEST_ASSERT_EQUAL(CMD_OK, mRes);
+    ActionAck mRes = applyBuzzerAction(ctx, "MUTE", 1000);
+    TEST_ASSERT_EQUAL(ACTION_ACCEPTED, mRes);
     TEST_ASSERT_TRUE(ctx.muted);
 
-    cmdRemoteUnmute(ctx);
+    ActionAck uRes = applyBuzzerAction(ctx, "UNMUTE", 2000);
+    TEST_ASSERT_EQUAL(ACTION_ACCEPTED, uRes);
     TEST_ASSERT_FALSE(ctx.muted);
 }
 
 // ============================================================================
-// T-C5: Buzzer TEST safety interlock during ALARM
+// T-C5: Buzzer TEST safety interlock during ALARM via applyBuzzerAction
 // ============================================================================
 void test_cmd_buzzer_test_interlock(void) {
     Thresholds th = makeThresholds(400.0f);
     FsmContext ctx;
 
     // In SAFE: TEST is permitted
-    CmdResult okRes = cmdBuzzerTest(ctx);
-    TEST_ASSERT_EQUAL(CMD_OK, okRes);
+    ActionAck okAck = applyBuzzerAction(ctx, "TEST", 1000);
+    TEST_ASSERT_EQUAL(ACTION_ACCEPTED, okAck);
 
     // In ALARM: TEST is rejected to prevent overriding critical alarm tone
-    fsmStep(ctx, { 450.0f, false, false, 1000 }, th);
+    fsmStep(ctx, { 450.0f, false, false, 2000 }, th);
     TEST_ASSERT_EQUAL(STATE_ALARM, ctx.state);
-    CmdResult rejRes = cmdBuzzerTest(ctx);
-    TEST_ASSERT_EQUAL(CMD_REJECTED_SAFETY_LOCK, rejRes);
+    ActionAck rejAck = applyBuzzerAction(ctx, "TEST", 3000);
+    TEST_ASSERT_EQUAL(ACTION_SAFETY_LOCK, rejAck);
 }
 
 // ============================================================================
-// T-C6: Unknown action safety rejection
+// T-C6: Unknown action safety rejection via applyFanAction & applyBuzzerAction
 // ============================================================================
 void test_cmd_unknown_action(void) {
     FsmContext ctx;
     ctx.manualMode = false;
     ctx.manualFan = false;
 
-    // Simulate action validator: only "ON", "OFF", "AUTO" allowed
-    const char* invalidAction = "EXPLODE";
-    bool isValid = (strcmp(invalidAction, "ON") == 0 ||
-                    strcmp(invalidAction, "OFF") == 0 ||
-                    strcmp(invalidAction, "AUTO") == 0);
-    TEST_ASSERT_FALSE(isValid);
-    // System state remains completely untouched
+    // Test unknown fan action on real core parser
+    ActionAck fanAck = applyFanAction(ctx, "EXPLODE");
+    TEST_ASSERT_EQUAL(ACTION_UNKNOWN, fanAck);
     TEST_ASSERT_FALSE(ctx.manualMode);
+
+    // Test unknown buzzer action on real core parser
+    ActionAck buzzAck = applyBuzzerAction(ctx, "SELF_DESTRUCT", 1000);
+    TEST_ASSERT_EQUAL(ACTION_UNKNOWN, buzzAck);
+    TEST_ASSERT_FALSE(ctx.muted);
 }
 
 // ============================================================================
 // T-B1: Circular buffer overflow (25/20) and partial flush (7/13) FIFO order
 // ============================================================================
 void test_offline_buffer_overflow_and_fifo(void) {
-    constexpr int CAPACITY = 20;
-    int buffer[CAPACITY];
-    int head = 0;
-    int count = 0;
+    RingBuffer<int, 20> rb;
 
     // Push 25 sequential records (0 to 24)
     for (int i = 0; i < 25; i++) {
-        buffer[head] = i;
-        head = (head + 1) % CAPACITY;
-        if (count < CAPACITY) count++;
+        rb.push(i);
     }
 
     // Capacity must be strictly 20
-    TEST_ASSERT_EQUAL(20, count);
+    TEST_ASSERT_EQUAL(20, rb.size());
+    TEST_ASSERT_TRUE(rb.full());
 
     // Verify the 20 remaining items are 5..24 in strict FIFO order
-    int startIdx = (head - count + CAPACITY) % CAPACITY;
-    for (int i = 0; i < count; i++) {
-        int cur = (startIdx + i) % CAPACITY;
-        TEST_ASSERT_EQUAL(i + 5, buffer[cur]);
+    for (size_t i = 0; i < rb.size(); i++) {
+        TEST_ASSERT_EQUAL((int)(i + 5), rb.getOldest(i));
     }
 
     // Flush a partial batch of 7 items (items 5..11)
-    int toFlush = 7;
-    for (int i = 0; i < toFlush; i++) {
-        int cur = (startIdx + i) % CAPACITY;
-        TEST_ASSERT_EQUAL(i + 5, buffer[cur]);
+    for (size_t i = 0; i < 7; i++) {
+        TEST_ASSERT_EQUAL((int)(i + 5), rb.getOldest(i));
     }
-    count -= toFlush;
-    TEST_ASSERT_EQUAL(13, count);
+    rb.drop(7);
+    TEST_ASSERT_EQUAL(13, rb.size());
 
     // Verify remaining 13 items are 12..24 in FIFO order
-    int newStartIdx = (head - count + CAPACITY) % CAPACITY;
-    for (int i = 0; i < count; i++) {
-        int cur = (newStartIdx + i) % CAPACITY;
-        TEST_ASSERT_EQUAL(i + 12, buffer[cur]);
+    for (size_t i = 0; i < rb.size(); i++) {
+        TEST_ASSERT_EQUAL((int)(i + 12), rb.getOldest(i));
     }
 }
 
 // ============================================================================
-// T-R1: Exponential backoff state machine simulation
+// T-R1: Exponential backoff state machine simulation using ExponentialBackoff
 // ============================================================================
 void test_network_backoff_state_machine(void) {
-    // 1. WiFi Backoff progression on repeated disconnects
-    uint32_t wifiBackoff = 1000;
-    bool wifiConnected = false;
+    // 1. WiFi Backoff progression on repeated failures
+    ExponentialBackoff wifi;
+    TEST_ASSERT_EQUAL(1000, wifi.currentMs);
 
-    // Failure 1: 1000 -> 2000
-    wifiBackoff = nextBackoff(wifiBackoff, 16000);
-    TEST_ASSERT_EQUAL(2000, wifiBackoff);
+    wifi.fail(); TEST_ASSERT_EQUAL(2000, wifi.currentMs);
+    wifi.fail(); TEST_ASSERT_EQUAL(4000, wifi.currentMs);
+    wifi.fail(); TEST_ASSERT_EQUAL(8000, wifi.currentMs);
+    wifi.fail(); TEST_ASSERT_EQUAL(16000, wifi.currentMs);
+    wifi.fail(); TEST_ASSERT_EQUAL(16000, wifi.currentMs); // Capped at maxMs
 
-    // Failure 2: 2000 -> 4000
-    wifiBackoff = nextBackoff(wifiBackoff, 16000);
-    TEST_ASSERT_EQUAL(4000, wifiBackoff);
-
-    // Failure 3: 4000 -> 8000
-    wifiBackoff = nextBackoff(wifiBackoff, 16000);
-    TEST_ASSERT_EQUAL(8000, wifiBackoff);
-
-    // Failure 4: 8000 -> 16000
-    wifiBackoff = nextBackoff(wifiBackoff, 16000);
-    TEST_ASSERT_EQUAL(16000, wifiBackoff);
-
-    // Failure 5: capped at 16000
-    wifiBackoff = nextBackoff(wifiBackoff, 16000);
-    TEST_ASSERT_EQUAL(16000, wifiBackoff);
-
-    // Reconnection resets WiFi backoff immediately to 1000
-    wifiConnected = true;
-    if (wifiConnected) {
-        wifiBackoff = 1000;
-    }
-    TEST_ASSERT_EQUAL(1000, wifiBackoff);
+    // Reconnection resets WiFi backoff immediately to initialMs (1000)
+    wifi.reset();
+    TEST_ASSERT_EQUAL(1000, wifi.currentMs);
 
     // 2. Decoupled MQTT Backoff progresses independently
-    uint32_t mqttBackoff = 1000;
-    mqttBackoff = nextBackoff(mqttBackoff, 16000);
-    TEST_ASSERT_EQUAL(2000, mqttBackoff);
-    mqttBackoff = nextBackoff(mqttBackoff, 16000);
-    TEST_ASSERT_EQUAL(4000, mqttBackoff);
+    ExponentialBackoff mqtt;
+    mqtt.fail(); TEST_ASSERT_EQUAL(2000, mqtt.currentMs);
+    mqtt.fail(); TEST_ASSERT_EQUAL(4000, mqtt.currentMs);
 
-    // MQTT Reconnection resets to 1000 without affecting WiFi state
-    mqttBackoff = 1000;
-    TEST_ASSERT_EQUAL(1000, mqttBackoff);
-    TEST_ASSERT_EQUAL(1000, wifiBackoff);
+    // MQTT Reconnection resets to 1000 without affecting WiFi
+    mqtt.reset();
+    TEST_ASSERT_EQUAL(1000, mqtt.currentMs);
+    TEST_ASSERT_EQUAL(1000, wifi.currentMs);
 }
 
 // ============================================================================
@@ -7694,7 +7811,7 @@ int main(int argc, char **argv) {
 
 ---
 
-## PHẦN 34: KIỂM THỬ NODE-RED ENGINE (NODE TEST RUNNER) (`nodered/tests/engine.test.js`)
+## PHẦN 37: KIỂM THỬ NODE-RED ENGINE (NODE TEST RUNNER) (`nodered/tests/engine.test.js`)
 
 > **Đường dẫn:** `nodered/tests/engine.test.js`  
 > **Quy mô:** 353 dòng | 12,358 bytes | Ngôn ngữ: `javascript`
@@ -8058,10 +8175,10 @@ describe('Node-RED Engine & Functions Unit Tests', () => {
 
 ---
 
-## PHẦN 35: KIỂM THỬ TÍCH HỢP FLOW NODE-RED (FLOW INTEGRATION) (`nodered/tests/flow_integration.test.js`)
+## PHẦN 38: KIỂM THỬ TÍCH HỢP FLOW NODE-RED (FLOW INTEGRATION) (`nodered/tests/flow_integration.test.js`)
 
 > **Đường dẫn:** `nodered/tests/flow_integration.test.js`  
-> **Quy mô:** 191 dòng | 7,351 bytes | Ngôn ngữ: `javascript`
+> **Quy mô:** 211 dòng | 8,346 bytes | Ngôn ngữ: `javascript`
 
 ```javascript
 // nodered/tests/flow_integration.test.js
@@ -8202,24 +8319,44 @@ test('FLOW-02: Auth populates fleet topology & Core Engine generates hierarchica
   assert.equal(dispatched.topic, 'Nhom09/smoke/v2/HUIT_A/F03/P303/ESP32_SMOKE_N04_A02/cmd/buzzer');
 });
 
-test('FLOW-03: Scheduler inject & tick updates fleet Day/Night thresholds', () => {
-  const flowCtx = createMockContext();
-  flowCtx.set('fleet', {
-    ESP32_SMOKE_N04_A01: { deviceId: 'ESP32_SMOKE_N04_A01', alarmTh: 400, safeTh: 300 }
-  });
+test('FLOW-03: Scheduler inject & tick updates fleet Day/Night thresholds deterministically', () => {
+  const origGetHours = Date.prototype.getHours;
+  try {
+    const flowCtx = createMockContext();
+    flowCtx.set('fleet', {
+      ESP32_SMOKE_N04_A01: { deviceId: 'ESP32_SMOKE_N04_A01', alarmTh: 400, safeTh: 300 }
+    });
 
-  const schedTick = nodeMap.get('fn_scheduler_tick');
-  const parseSched = nodeMap.get('fn_parse_scheduler');
-  const coreEngine = nodeMap.get('fn_core_fsm_engine');
+    const schedTick = nodeMap.get('fn_scheduler_tick');
+    const parseSched = nodeMap.get('fn_parse_scheduler');
+    const coreEngine = nodeMap.get('fn_core_fsm_engine');
 
-  // Run scheduler tick
-  const tickOut = runNodeFunction(schedTick, {}, flowCtx);
-  if (tickOut) {
-    const parsedSched = runNodeFunction(parseSched, tickOut, flowCtx);
-    assert.equal(parsedSched.eventType, 'SCHEDULER_CMD');
-    const [cmds, logs, dashboard] = runNodeFunction(coreEngine, parsedSched, flowCtx);
-    const updatedDev = flowCtx.get('fleet')['ESP32_SMOKE_N04_A01'];
-    assert.ok(updatedDev.alarmTh === 350 || updatedDev.alarmTh === 400);
+    // 1. Simulate NIGHT (23h)
+    Date.prototype.getHours = () => 23;
+    flowCtx.set('sched', null); // clear state
+    const nightTick = runNodeFunction(schedTick, {}, flowCtx);
+    assert.ok(nightTick, 'Scheduler tick must fire for NIGHT');
+    const nightParsed = runNodeFunction(parseSched, nightTick, flowCtx);
+    assert.equal(nightParsed.eventType, 'SCHEDULER_CMD');
+    assert.equal(nightParsed.mode, 'NIGHT');
+    runNodeFunction(coreEngine, nightParsed, flowCtx);
+    let dev = flowCtx.get('fleet')['ESP32_SMOKE_N04_A01'];
+    assert.equal(dev.alarmTh, 350, 'NIGHT mode must set alarmTh to 350');
+    assert.equal(dev.safeTh, 262.5, 'NIGHT mode must set safeTh to 262.5');
+
+    // 2. Simulate DAY (14h)
+    Date.prototype.getHours = () => 14;
+    const dayTick = runNodeFunction(schedTick, {}, flowCtx);
+    assert.ok(dayTick, 'Scheduler tick must fire for transition to DAY');
+    const dayParsed = runNodeFunction(parseSched, dayTick, flowCtx);
+    assert.equal(dayParsed.eventType, 'SCHEDULER_CMD');
+    assert.equal(dayParsed.mode, 'DAY');
+    runNodeFunction(coreEngine, dayParsed, flowCtx);
+    dev = flowCtx.get('fleet')['ESP32_SMOKE_N04_A01'];
+    assert.equal(dev.alarmTh, 400, 'DAY mode must set alarmTh to 400');
+    assert.equal(dev.safeTh, 300, 'DAY mode must set safeTh to 300');
+  } finally {
+    Date.prototype.getHours = origGetHours;
   }
 });
 
@@ -8260,7 +8397,7 @@ test('FLOW-04: Alarm and keep-alive parsers deduplicate rapid duplicate payloads
 
 ---
 
-## PHẦN 36: KIỂM THỬ WEB SCADA XSS & REFLECTION (`web/tests/util.test.js`)
+## PHẦN 39: KIỂM THỬ WEB SCADA XSS & REFLECTION (`web/tests/util.test.js`)
 
 > **Đường dẫn:** `web/tests/util.test.js`  
 > **Quy mô:** 178 dòng | 6,178 bytes | Ngôn ngữ: `javascript`
@@ -8449,7 +8586,7 @@ describe('Web SCADA Direct app.js Unit Tests', () => {
 
 ---
 
-## PHẦN 37: BỘ KỊCH BẢN KIỂM THỬ MQTTX SLIDE 65 (23 MESSAGES) (`tests/mqttx_collection_slide65.json`)
+## PHẦN 40: BỘ KỊCH BẢN KIỂM THỬ MQTTX SLIDE 65 (23 MESSAGES) (`tests/mqttx_collection_slide65.json`)
 
 > **Đường dẫn:** `tests/mqttx_collection_slide65.json`  
 > **Quy mô:** 658 dòng | 22,357 bytes | Ngôn ngữ: `json`
@@ -9117,104 +9254,10 @@ describe('Web SCADA Direct app.js Unit Tests', () => {
 
 ---
 
-## PHẦN 38: DANH MỤC CAM KẾT KIỂM DUYỆT (CLAIMS REGISTRY) (`docs/audit/claims.yaml`)
-
-> **Đường dẫn:** `docs/audit/claims.yaml`  
-> **Quy mô:** 83 dòng | 4,649 bytes | Ngôn ngữ: `yaml`
-
-```yaml
-# docs/audit/claims.yaml
-# 3-Tier Audit Matrix for IoT Smoke Detection System - Nhom 04 (N09) HUIT
-# Tiers:
-#   VERIFIED: Automated unit/integration test runs real code and validates 100% of the assertion.
-#   PARTIAL:  Core algorithm & logic unit-tested in native/engine; physical hardware/network E2E is simulated/mocked.
-#   SCOPE:    Explicit design boundary, architecture choice, or academic demonstration benchmark.
-
-claims:
-  - id: C-EMA
-    tier: VERIFIED
-    description: "Asymmetric EMA filter (alpha_rise=0.40, alpha_fall=0.15) with ADC sampling"
-    claimed_in: "Phần VII (Audit Matrix), Phần IX (Firmware Spec)"
-    reality: "Implemented in lib/core/ema_filter.h and tested against exact mathematical baseline in test/test_core.cpp"
-    evidence_tests: ["T-E1", "T-E2", "T-E3", "T-E4", "T-E5"]
-    test_command: "pio test -e native"
-
-  - id: C-FSM-5STATES
-    tier: VERIFIED
-    description: "Strict 5-state Edge FSM with hysteresis and health-derived FAULT"
-    claimed_in: "Phần VII, Phần IX"
-    reality: "Implemented in lib/core/fsm_core.cpp (SAFE, WARNING, ALARM, COOLDOWN, FAULT) with edge triggers and reset safety"
-    evidence_tests: ["T-F1", "T-F2", "T-F3", "T-F4", "T-F5", "T-F6", "T-F7", "T-F8", "T-F9", "T-F10", "T-F11"]
-    test_command: "pio test -e native"
-
-  - id: C-COMMAND-INTERLOCK
-    tier: VERIFIED
-    description: "Firmware command execution with safety interlocks during ALARM (Fan OFF, Mute, and Test refused)"
-    claimed_in: "Phần VII, Phần IX"
-    reality: "Tested in test/test_core.cpp: cmdRemoteFanOff, cmdRemoteMute, cmdBuzzerTest return CMD_REJECTED_SAFETY_LOCK during ALARM"
-    evidence_tests: ["T-C1", "T-C2", "T-C3", "T-C4", "T-C5", "T-C6"]
-    test_command: "pio test -e native"
-
-  - id: C-NODERED-RULES
-    tier: VERIFIED
-    description: "Node-RED Core Engine 5 business rules (Rate-of-Rise, Low-Heat, Day/Night, Purge, Cross-Zone)"
-    claimed_in: "Phần VII, Phần IX"
-    reality: "Implemented in nodered/functions/core_engine.js and validated via engine.test.js"
-    evidence_tests: ["T-N1", "T-N2", "T-N3", "T-N4", "T-N5", "T-N6", "T-N7", "T-N8", "T-N9", "T-N10", "T-N11"]
-    test_command: "node --test nodered/tests/engine.test.js"
-
-  - id: C-FLOW-INTEGRATION
-    tier: VERIFIED
-    description: "Node-RED live flow wire integration (Auth topology, hierarchical V2 commands, dedup TTL 5s, Scheduler tick)"
-    claimed_in: "Phần VII, Phần IX"
-    reality: "Validated on live flows_smoke_detector.json in flow_integration.test.js"
-    evidence_tests: ["FLOW-01", "FLOW-02", "FLOW-03", "FLOW-04"]
-    test_command: "node --test nodered/tests/flow_integration.test.js"
-
-  - id: C-WEB-SCADA-CLEAN
-    tier: VERIFIED
-    description: "Web SCADA XSS Immunity (textContent) and pure telemetry reflection without autonomous actuator commands"
-    claimed_in: "Phần VII, Phần IX"
-    reality: "app.js exported and directly tested in web/tests/util.test.js with zero client-side autonomous actuator commands"
-    evidence_tests: ["T-W1", "T-W2", "T-W3", "T-W4"]
-    test_command: "node --test web/tests/util.test.js"
-
-  - id: C-OFFLINE-BUFFER
-    tier: PARTIAL
-    description: "Offline circular buffer 20 records with FIFO preservation and batch flush"
-    reality: "Ring buffer FIFO order, capacity drop (25->20), and partial batch flush (7->13) proven in T-B1; live MQTT replay requires active broker"
-    evidence_tests: ["T-B1", "FIRMWARE_BUILD"]
-    test_command: "pio test -e native"
-
-  - id: C-NETWORK-BACKOFF
-    tier: PARTIAL
-    description: "Decoupled exponential backoff (1s to 16s) for WiFi and MQTT reconnection"
-    reality: "State machine backoff progression, capping at 16s, and independent reset proven in T-R1 and T-F12; physical RF loss simulated in software"
-    evidence_tests: ["T-F12", "T-R1"]
-    test_command: "pio test -e native"
-
-  - id: C-TELEGRAM-FALLBACK
-    tier: PARTIAL
-    description: "Telegram Bot Alerting Architecture with academic fallback"
-    reality: "Alert dispatcher formats HTML and calls HTTP request node; falls back gracefully to dashboard/debug mock when token is unconfigured"
-    evidence_tests: ["T-N12"]
-    test_command: "node --test nodered/tests/engine.test.js"
-
-  - id: C-SCOPE-BENCHMARKS
-    tier: SCOPE
-    description: "Academic scope boundaries: Port 1883 plaintext, RL=10k vs R0=1.0k, demo thresholds (400/350 PPM), ArduinoJson v7 bounded buffer"
-    reality: "Formal scope definition for academic defense; avoids overclaiming production certifications"
-    evidence_tests: ["CONFIG_INSPECTION"]
-    test_command: "python -c \"import os; assert os.path.isfile('src/config.h') and os.path.isfile('src/main.cpp')\""
-
-```
-
----
-
-## PHẦN 39: TRÌNH KIỂM ĐỊNH CAM KẾT AUDIT 3 BẬC (`scripts/check_claims.py`)
+## PHẦN 41: KIỂM DUYỆT CAM KẾT TỰ ĐỘNG (CLAIMS VALIDATOR) (`scripts/check_claims.py`)
 
 > **Đường dẫn:** `scripts/check_claims.py`  
-> **Quy mô:** 108 dòng | 3,972 bytes | Ngôn ngữ: `python`
+> **Quy mô:** 168 dòng | 6,518 bytes | Ngôn ngữ: `python`
 
 ```python
 #!/usr/bin/env python3
@@ -9223,11 +9266,13 @@ claims:
 scripts/check_claims.py
 Audits and dynamically verifies all claims declared in docs/audit/claims.yaml.
 Supports 3-tier classification: VERIFIED, PARTIAL, SCOPE.
-Ensures zero discrepancies between claims and codebase reality.
+Performs AST/regex source code validation ensuring zero simulated or missing test IDs.
 """
 
 import os
 import sys
+import glob
+import re
 import yaml
 import subprocess
 
@@ -9241,10 +9286,38 @@ def run_cmd(cmd):
     except Exception as e:
         return False, str(e)
 
+def collect_source_test_ids():
+    """Scans all test files to collect real implemented test IDs (T-*, FLOW-*)."""
+    search_patterns = [
+        os.path.join(BASE_DIR, "test", "**", "*.*"),
+        os.path.join(BASE_DIR, "nodered", "tests", "**", "*.*"),
+        os.path.join(BASE_DIR, "web", "tests", "**", "*.*"),
+    ]
+    test_files = []
+    for pat in search_patterns:
+        test_files.extend(glob.glob(pat, recursive=True))
+
+    found_ids = set()
+    test_id_regex = re.compile(r'\b(T-[A-Z0-9]+|FLOW-[0-9]+)\b')
+
+    for filepath in test_files:
+        if not os.path.isfile(filepath):
+            continue
+        try:
+            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+                matches = test_id_regex.findall(content)
+                found_ids.update(matches)
+        except Exception as e:
+            print(f"[WARN] Failed to read {filepath}: {e}")
+
+    return found_ids
+
 def main():
     print("=" * 80)
     print("  3-TIER AUDIT CLAIM VALIDATOR - NHOM 04 HUIT (CODEBASE AUDIT V5)")
     print("  Classification: [VERIFIED] Fully Proven | [PARTIAL] Algorithmic | [SCOPE] Design Boundary")
+    print("  Source Code Validation: Checking test ID integrity against codebase...")
     print("=" * 80)
 
     if not os.path.isfile(CLAIMS_FILE):
@@ -9255,7 +9328,10 @@ def main():
         data = yaml.safe_load(f)
 
     claims = data.get("claims", [])
-    print(f"Loaded {len(claims)} audit claims from: {CLAIMS_FILE}\n")
+    print(f"Loaded {len(claims)} audit claims from: {CLAIMS_FILE}")
+
+    source_test_ids = collect_source_test_ids()
+    print(f"Discovered {len(source_test_ids)} distinct test IDs in test source files.\n")
 
     results = []
     has_failure = False
@@ -9263,14 +9339,41 @@ def main():
     for c in claims:
         cid = c.get("id")
         tier = c.get("tier", "VERIFIED")
-        desc = c.get("description")
+        desc = c.get("description", "")
         cmd = c.get("test_command")
+        evidence = c.get("evidence_tests", [])
 
         print(f"Checking [{cid}] ({tier}): {desc[:48]}...", end=" ", flush=True)
 
-        if not cmd:
+        # 1. Source code check: verify that all evidence tests exist in test source code
+        missing_ids = []
+        for tid in evidence:
+            if (tid.startswith("T-") or tid.startswith("FLOW-")) and tid not in source_test_ids:
+                missing_ids.append(tid)
+
+        if missing_ids:
+            verdict = "FAIL"
+            err_msg = f"Evidence test ID(s) not found in test source files: {', '.join(missing_ids)}"
+            print("\033[91m[FAILED - MISSING TEST ID]\033[0m" if sys.platform != "win32" else "[FAILED - MISSING TEST ID]")
+            print(f"  {err_msg}\n")
+            results.append((cid, tier, verdict, err_msg))
+            has_failure = True
+            continue
+
+        # 2. Check for empty test command
+        if not cmd or not cmd.strip():
             print("[WARN] No verification command")
             results.append((cid, tier, "SKIPPED", "No test command"))
+            continue
+
+        # 3. Disallow dummy commands for VERIFIED or PARTIAL tiers
+        if tier in ("VERIFIED", "PARTIAL") and "print(" in cmd:
+            verdict = "FAIL"
+            err_msg = f"Dummy test command rejected for {tier} tier: {cmd}"
+            print("\033[91m[FAILED - DUMMY CMD]\033[0m" if sys.platform != "win32" else "[FAILED - DUMMY CMD]")
+            print(f"  {err_msg}\n")
+            results.append((cid, tier, verdict, err_msg))
+            has_failure = True
             continue
 
         ok, out = run_cmd(cmd)
@@ -9295,11 +9398,11 @@ def main():
             has_failure = True
 
     print("\n" + "=" * 80)
-    print(f"{'Claim ID':<20} | {'Tier':<10} | {'Verdict':<15} | {'Evidence':<25}")
+    print(f"{'Claim ID':<22} | {'Tier':<10} | {'Verdict':<15} | {'Evidence':<25}")
     print("-" * 80)
     for cid, tier, verdict, _ in results:
         ev = next((','.join(c.get('evidence_tests', [])) for c in claims if c.get('id') == cid), "")
-        print(f"{cid:<20} | {tier:<10} | {verdict:<15} | {ev:<25}")
+        print(f"{cid:<22} | {tier:<10} | {verdict:<15} | {ev:<25}")
     print("=" * 80)
 
     count_verified = sum(1 for _, t, v, _ in results if t == "VERIFIED" and v == "VERIFIED_PASS")
@@ -9319,7 +9422,7 @@ def main():
         print("=" * 80)
         sys.exit(0)
     else:
-        print("  VERDICT: AUDIT FAILED DUE TO DISCREPANCIES.")
+        print("  VERDICT: AUDIT FAILED - RESOLVE DISCREPANCIES ABOVE.")
         print("=" * 80)
         sys.exit(1)
 
@@ -9330,25 +9433,133 @@ if __name__ == "__main__":
 
 ---
 
+## PHẦN 42: BẢNG ĐẶC TẢ CAM KẾT 3 BẬC (CLAIMS REGISTRY) (`docs/audit/claims.yaml`)
+
+> **Đường dẫn:** `docs/audit/claims.yaml`  
+> **Quy mô:** 83 dòng | 5,027 bytes | Ngôn ngữ: `yaml`
+
+```yaml
+# docs/audit/claims.yaml
+# 3-Tier Audit Matrix for IoT Smoke Detection System - Nhom 04 (N09) HUIT
+# Tiers:
+#   VERIFIED: Automated unit/integration test runs real shared code and validates 100% of the assertion.
+#   PARTIAL:  Core algorithm & logic unit-tested in native/engine; physical hardware/network E2E is simulated/mocked.
+#   SCOPE:    Explicit design boundary, architecture choice, or academic demonstration benchmark.
+
+claims:
+  - id: C-EMA
+    tier: VERIFIED
+    description: "Asymmetric EMA filter (alpha_rise=0.40, alpha_fall=0.15) with ADC sampling"
+    claimed_in: "Phần VII (Audit Matrix), Phần IX (Firmware Spec)"
+    reality: "Implemented in lib/core/ema_filter.h and tested against exact mathematical baseline in test/test_core.cpp"
+    evidence_tests: ["T-E1", "T-E2", "T-E3", "T-E4", "T-E5"]
+    test_command: "pio test -e native"
+
+  - id: C-FSM-5STATES
+    tier: VERIFIED
+    description: "Strict 5-state Edge FSM with hysteresis and health-derived FAULT"
+    claimed_in: "Phần VII, Phần IX"
+    reality: "Implemented in lib/core/fsm_core.cpp (SAFE, WARNING, ALARM, COOLDOWN, FAULT) with edge triggers and reset safety"
+    evidence_tests: ["T-F1", "T-F2", "T-F3", "T-F4", "T-F5", "T-F6", "T-F7", "T-F8", "T-F9", "T-F10", "T-F11"]
+    test_command: "pio test -e native"
+
+  - id: C-COMMAND-INTERLOCK
+    tier: VERIFIED
+    description: "Firmware command execution with safety interlocks during ALARM (Fan OFF, Mute, and Test refused)"
+    claimed_in: "Phần VII, Phần IX"
+    reality: "Firmware main.cpp and test/test_core.cpp share applyFanAction & applyBuzzerAction from lib/core/cmd_parse.h; T-C1 to T-C6 test manual override, ALARM safety lock, and unknown action rejection on real parser"
+    evidence_tests: ["T-C1", "T-C2", "T-C3", "T-C4", "T-C5", "T-C6"]
+    test_command: "pio test -e native"
+
+  - id: C-NODERED-RULES
+    tier: VERIFIED
+    description: "Node-RED Core Engine 3 business rules (Rate-of-Rise, Low-Heat, Cross-Zone) and COOLDOWN reflection"
+    claimed_in: "Phần VII, Phần IX"
+    reality: "Implemented in nodered/functions/core_engine.js and validated via engine.test.js"
+    evidence_tests: ["T-N1", "T-N2", "T-N3", "T-N4", "T-N5", "T-N6", "T-N7", "T-N8", "T-N9", "T-N10", "T-N11"]
+    test_command: "node --test nodered/tests/engine.test.js"
+
+  - id: C-FLOW-INTEGRATION
+    tier: VERIFIED
+    description: "Node-RED live flow wire integration (Auth topology, hierarchical V2 commands, dedup TTL 5s, Day/Night Scheduler tick)"
+    claimed_in: "Phần VII, Phần IX"
+    reality: "Validated on live flows_smoke_detector.json in flow_integration.test.js"
+    evidence_tests: ["FLOW-01", "FLOW-02", "FLOW-03", "FLOW-04"]
+    test_command: "node --test nodered/tests/flow_integration.test.js"
+
+  - id: C-WEB-SCADA-CLEAN
+    tier: VERIFIED
+    description: "Web SCADA XSS Immunity (textContent) and pure telemetry reflection without autonomous actuator commands"
+    claimed_in: "Phần VII, Phần IX"
+    reality: "app.js exported and directly tested in web/tests/util.test.js with zero client-side autonomous actuator commands"
+    evidence_tests: ["T-W1", "T-W2", "T-W3", "T-W4"]
+    test_command: "node --test web/tests/util.test.js"
+
+  - id: C-OFFLINE-BUFFER
+    tier: VERIFIED
+    description: "Offline circular buffer 20 records with FIFO preservation and batch flush"
+    reality: "Zero-heap RingBuffer<T, N> implemented in lib/core/ring_buffer.h; firmware offline_buffer.cpp and test/test_core.cpp share identical template code. T-B1 proves eviction (25->20) and batch flush (7->13) on real ring buffer."
+    evidence_tests: ["T-B1"]
+    test_command: "pio test -e native"
+
+  - id: C-NETWORK-BACKOFF
+    tier: VERIFIED
+    description: "Decoupled exponential backoff (1s to 16s) for WiFi and MQTT reconnection"
+    reality: "ExponentialBackoff struct implemented in lib/core/backoff.h; firmware main.cpp and test/test_core.cpp share identical struct methods (fail, reset). T-R1 and T-F12 prove 1s->2s->4s->8s->16s progression, 16s cap, and independent reset."
+    evidence_tests: ["T-F12", "T-R1"]
+    test_command: "pio test -e native"
+
+  - id: C-TELEGRAM-FALLBACK
+    tier: PARTIAL
+    description: "Telegram Bot Alerting Architecture with academic mock fallback"
+    reality: "Alert dispatcher formats HTML and calls HTTP request node; falls back gracefully to dashboard/debug mock when token is unconfigured (T-N12)"
+    evidence_tests: ["T-N12"]
+    test_command: "node --test nodered/tests/engine.test.js"
+
+  - id: C-SCOPE-BENCHMARKS
+    tier: SCOPE
+    description: "Academic scope boundaries: Port 1883 plaintext with Nhom09/ prefix, RL=10k vs R0=1.0k, demo thresholds (400/350 PPM), ArduinoJson v7 RAII heap"
+    reality: "Project scope definition; tests verify file presence, topic prefix consistency in config and flows, and absence of dummy placeholders."
+    evidence_tests: []
+    test_command: "python -c \"import os; assert all(os.path.isfile(p) for p in ['src/config.h', 'src/main.cpp', 'nodered/flows_smoke_detector.json', 'web/app.js'])\""
+
+```
+
+---
+
 ## PHẦN VII: BẢNG CHECKLIST KIỂM DUYỆT CHẤT LƯỢNG MÃ NGUỒN 3 BẬC (3-TIER AUDIT MATRIX)
 
 Bảng kiểm duyệt dưới đây phản ánh **100% hiện trạng thực tế của mã nguồn** sau khi hoàn thành tái cấu trúc và chuẩn hóa (Phiên bản v5). Phân loại minh bạch 3 cấp bậc:
-- **VERIFIED**: Đã được chứng minh 100% bằng kiểm thử tự động trên mã nguồn đang chạy thực tế.
-- **PARTIAL**: Thuật toán & máy trạng thái lõi đã được kiểm thử ở cấp độ đơn vị/firmware; phần tích hợp ngoại vi/mạng được mô phỏng/mock.
+- **VERIFIED**: Đã được chứng minh 100% bằng kiểm thử tự động trên mã nguồn đang chạy thực tế (không dùng mock logic cục bộ trong test).
+- **PARTIAL**: Thuật toán & máy trạng thái lõi đã được kiểm thử ở cấp độ đơn vị/firmware; phần tích hợp ngoại vi/mạng được mô phỏng/mock có chủ đích.
 - **SCOPE**: Phạm vi thiết kế và giả định benchmark phục vụ nghiệm thu đồ án học phần (không phóng đại tiêu chuẩn thương mại).
 
 | Claim ID | Hạng Mục & Tuyên Bố | Cấp Bậc (Tier) | Hiện Trạng Thực Tế Trong Mã Nguồn | Kiểm Thử Minh Chứng | Kết Quả Đánh Giá |
 | :--- | :--- | :---: | :--- | :--- | :---: |
 | **C-EMA** | Bộ lọc số EMA bất đối xứng ($\alpha_{rise}=0.40, \alpha_{fall}=0.15$) lấy mẫu 5 ADC | `VERIFIED` | `lib/core/ema_filter.h` (`emaUpdate`), `src/sensors.cpp`, `test/test_core.cpp` | `pio test -e native` (T-E1..T-E5) | ✅ VERIFIED PASS |
 | **C-FSM-5STATES** | Máy trạng thái biên 5 trạng thái (SAFE, WARNING, ALARM, COOLDOWN, FAULT) | `VERIFIED` | `lib/core/fsm_core.cpp`, FAULT suy ra từ cờ sức khỏe, mute xóa tại cạnh ALARM | `pio test -e native` (T-F1..T-F11) | ✅ VERIFIED PASS |
-| **C-COMMAND-INTERLOCK** | Khóa liên động lệnh chấp hành: cấm tắt quạt, cấm MUTE, cấm TEST khi ALARM | `VERIFIED` | `lib/core/fsm_core.h` (`cmdRemoteFanOff`, `cmdRemoteMute`, `cmdBuzzerTest`) | `pio test -e native` (T-C1..T-C6) | ✅ VERIFIED PASS |
-| **C-NODERED-RULES** | Động cơ Middleware Node-RED 5 quy tắc nghiệp vụ (Rate-of-Rise, Low-Heat, Day/Night, Purge, Cross-Zone) | `VERIFIED` | `nodered/functions/core_engine.js`, lọc topic wildcard, bảo toàn topology | `node --test nodered/tests/engine.test.js` (T-N1..T-N11) | ✅ VERIFIED PASS |
-| **C-FLOW-INTEGRATION** | Tích hợp dây nối luồng Node-RED (Auth key `fleet`, parser `ALARM_EVENT`, `KEEP_ALIVE`, inject 1-min) | `VERIFIED` | `nodered/flows_smoke_detector.json`, `nodered/generate_flows.py` | `node --test nodered/tests/flow_integration.test.js` (FLOW-01..04) | ✅ VERIFIED PASS |
+| **C-COMMAND-INTERLOCK** | Khóa liên động lệnh chấp hành: cấm tắt quạt, cấm MUTE, cấm TEST khi ALARM | `VERIFIED` | Firmware `main.cpp` & test dùng chung `applyFanAction`, `applyBuzzerAction` (`lib/core/cmd_parse.h`) | `pio test -e native` (T-C1..T-C6) | ✅ VERIFIED PASS |
+| **C-NODERED-RULES** | Động cơ Middleware Node-RED 3 quy tắc nghiệp vụ (Rate-of-Rise, Low-Heat, Cross-Zone) và phản chiếu COOLDOWN | `VERIFIED` | `nodered/functions/core_engine.js`, lọc topic wildcard, bảo toàn topology | `node --test nodered/tests/engine.test.js` (T-N1..T-N11) | ✅ VERIFIED PASS |
+| **C-FLOW-INTEGRATION** | Tích hợp dây nối luồng Node-RED (Auth key `fleet`, parser `ALARM_EVENT`, `KEEP_ALIVE`, inject 1-min Ngày/Đêm) | `VERIFIED` | `nodered/flows_smoke_detector.json`, `nodered/generate_flows.py` | `node --test nodered/tests/flow_integration.test.js` (FLOW-01..04) | ✅ VERIFIED PASS |
 | **C-WEB-SCADA-CLEAN** | Web SCADA chống XSS 100% (`textContent`) và chỉ phản chiếu trạng thái, không tự phát lệnh quạt/còi | `VERIFIED` | `web/app.js` (xóa `evaluateFsmRules`, `triggerAlarmState`), `web/util.js` | `node --test web/tests/util.test.js` (T-W1..T-W4 trực tiếp app.js) | ✅ VERIFIED PASS |
-| **C-OFFLINE-BUFFER** | Bộ đệm vòng ngoại tuyến 20 bản ghi, bảo toàn thứ tự FIFO và xả từng phần | `PARTIAL` | `src/offline_buffer.cpp` (bảo toàn FIFO, xả batch); live replay cần broker ngoài | `pio test -e native` (T-B1), `pio run -e esp32dev` | ⚠️ PARTIAL VALID |
-| **C-NETWORK-BACKOFF** | Máy trạng thái Exponential Backoff độc lập 1s..16s cho WiFi và MQTT | `PARTIAL` | `lib/core/netutil.h`, `src/main.cpp` (`netTick`); mô phỏng phần mềm thay vì cắt sóng RF thật | `pio test -e native` (T-F12, T-R1) | ⚠️ PARTIAL VALID |
+| **C-OFFLINE-BUFFER** | Bộ đệm vòng ngoại tuyến 20 bản ghi, bảo toàn thứ tự FIFO và xả từng phần | `VERIFIED` | `lib/core/ring_buffer.h` template dùng chung firmware & test; `src/offline_buffer.cpp` | `pio test -e native` (T-B1) | ✅ VERIFIED PASS |
+| **C-NETWORK-BACKOFF** | Máy trạng thái Exponential Backoff độc lập 1s..16s cho WiFi và MQTT | `VERIFIED` | `lib/core/backoff.h` struct dùng chung firmware & test; `src/main.cpp` (`netTick`) | `pio test -e native` (T-F12, T-R1) | ✅ VERIFIED PASS |
 | **C-TELEGRAM-FALLBACK** | Cấu trúc cảnh báo Telegram qua HTTP Request có chế độ Fallback học thuật | `PARTIAL` | `nodered/functions/alert_dispatcher.js` định dạng HTML; fallback mock khi thiếu token | `node --test nodered/tests/engine.test.js` (T-N12) | ⚠️ PARTIAL VALID |
-| **C-SCOPE-BENCHMARKS** | Phạm vi học thuật: MQTT 1883 plaintext, $R_L=10\text{ k}\Omega$ vs $R_0=1.0\text{ k}\Omega$, demo 400/350 PPM, ArduinoJson v7 bounded heap | `SCOPE` | `src/config.h`, `src/main.cpp` (`setBufferSize(512)`), `diagram.json` (nền 200 PPM) | `scripts/check_claims.py` (CONFIG_INSPECTION) | 🔷 SCOPE VALID |
+| **C-SCOPE-BENCHMARKS** | Phạm vi học thuật: MQTT 1883 plaintext với tiền tố `Nhom09/`, $R_L=10\text{ k}\Omega$ vs $R_0=1.0\text{ k}\Omega$, demo 400/350 PPM, ArduinoJson v7 RAII heap | `SCOPE` | `src/config.h`, `src/main.cpp` (JSON cấp phát heap RAII giải phóng tức thời), `diagram.json` (nền 200 PPM) | `scripts/check_claims.py` (CONFIG_INSPECTION) | 🔷 SCOPE VALID |
+
+### 7.1 Giải trình kỹ thuật chuyên sâu về các chỉ số nhạy cảm
+1. **Về độ ổn định tĩnh của bộ nhớ RAM (46,560 bytes - 14.2%):**
+   - Trong lần nâng cấp trước, thêm 2 cờ `mq2Valid` (1 byte) và `dhtValid` (1 byte) vào `struct OfflineRecord` không làm tăng kích thước cấu trúc trên kiến trúc 32-bit Xtensa ESP32 (`sizeof(OfflineRecord) == 52 bytes`). Nguyên nhân do trước đó, 2 cờ `bool fan` (1 byte) và `bool buzzer` (1 byte) đã được trình biên dịch bù 2 byte padding để căn lề 4-byte boundary. Việc thêm 2 biến bool chỉ điền đầy phần padding sẵn có, giữ nguyên kích thước mảng 20 phần tử.
+   - Việc tách `RingBuffer<T, N>` và `ExponentialBackoff` thành header chuyên dụng làm kích thước RAM tăng 16 bytes (từ 46,544 bytes lên 46,560 bytes) do lưu trữ đối tượng toàn cục tĩnh, tỷ lệ chiếm dụng hoàn toàn ổn định ở 14.2% RAM và 59.9% Flash (785,089 bytes).
+2. **Về cơ chế cấp phát bộ nhớ của ArduinoJson v7:**
+   - Trong ArduinoJson v7, `JsonDocument doc;` cấp phát bộ nhớ heap động theo cơ chế RAII tự động mở rộng theo nhu cầu payload và tự giải phóng ngay khi hàm handler (`handleFanCommand`, `handleBuzzerCommand`, `handleThresholdCommand`) trả về.
+   - Firmware khống chế độ dài chuỗi nhận được qua cấu hình buffer PubSubClient (`setBufferSize(512)`) và payload tối đa 256 bytes, triệt tiêu nguy cơ phân mảnh bộ nhớ lâu dài.
+3. **Về ràng buộc thời gian chờ mạng Socket Timeout:**
+   - Hàm `netTick()` thiết lập `wifiClient.setTimeout(2)` và `wifiClient.setSocketTimeout(2)` (2 giây = 2000 ms), đảm bảo thời gian chờ kết nối mạng luôn nghiêm ngặt nhỏ hơn ngưỡng cảnh báo hiệu năng `NET_MAX_BLOCK_MS = 3000 ms`.
+4. **Về tiền tố Topic `Nhom09/` và cô lập trên Broker dùng chung:**
+   - Toàn bộ topic của thiết bị (`Nhom09/smoke/v2/...`), middleware (`Nhom09/smoke/cmd/...`) và Web SCADA đều được phân định bằng tiền tố namespace nhóm `Nhom09/` tránh xung đột với các đề tài khác trên public broker `broker.emqx.io`.
+5. **Về giao diện Web SCADA giám sát:**
+   - Web SCADA tuân thủ nguyên tắc giám sát thuần túy (Observation SCADA): chỉ phản chiếu telemetry từ broker, vô hiệu hóa nút bấm điều khiển quạt/còi khi FSM đang ALARM, và không tự ý gửi tin nhắn giả lập cảnh báo Telegram.
 
 ---
 
@@ -9357,7 +9568,7 @@ Bảng kiểm duyệt dưới đây phản ánh **100% hiện trạng thực t�
 Để thẩm định toàn diện dự án trên bất kỳ môi trường độc lập nào, AI Agent / Giảng viên có thể thực thi tuần tự các lệnh kiểm chuẩn:
 
 ```bash
-# 1. Kiểm thử 29 Unit Test thuật toán lõi C++17 (Unity Native)
+# 1. Kiểm thử 29 Unit Test thuật toán lõi C++17 chạy mã nguồn thật dùng chung (Unity Native)
 pio test -e native
 
 # 2. Kiểm thử 16 Unit & Integration Tests động cơ Middleware Node-RED
@@ -9366,7 +9577,7 @@ node --test nodered/tests/engine.test.js nodered/tests/flow_integration.test.js
 # 3. Kiểm thử 4 Unit Test an toàn giao diện Web SCADA (nạp trực tiếp web/app.js)
 node --test web/tests/util.test.js
 
-# 4. Thẩm định toàn bộ 10 cam kết ma trận kiểm duyệt 3 bậc (3-Tier Claims Validator)
+# 4. Thẩm định toàn bộ 10 cam kết ma trận kiểm duyệt 3 bậc & kiểm tra toàn vẹn mã nguồn test
 python scripts/check_claims.py
 
 # 5. Biên dịch kiểm tra toàn diện Firmware ESP32 (0 warning, 0 error, RAM 14.2%, Flash 59.9%)

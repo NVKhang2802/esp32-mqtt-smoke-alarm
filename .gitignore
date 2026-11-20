@@ -219,3 +219,6 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-store/
 .parcel-cache/
+
+.nodered_runtime/
+

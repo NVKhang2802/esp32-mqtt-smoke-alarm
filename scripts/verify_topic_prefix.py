@@ -111,7 +111,7 @@ def verify_mqttx_collection():
 
 def main():
     print("=" * 75)
-    print("  TOPIC PREFIX CONSISTENCY AUDITOR - NHOM 04 HUIT")
+    print("  TOPIC PREFIX CONSISTENCY AUDITOR - NHOM 09 HUIT")
     print(f"  Target Namespace: '{EXPECTED_PREFIX}'")
     print("=" * 75)
 

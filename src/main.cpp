@@ -48,7 +48,7 @@ static bool g_simMq2 = false;
 static bool g_simDht = false;
 
 // Session & Client Identity
-static char g_sessionKey[40] = "SK_SESSION_DEFAULT_N04";
+static char g_sessionKey[40] = "SK_SESSION_DEFAULT_N09";
 static char g_clientId[40]   = "";
 static char g_macAddress[20] = "";
 
@@ -217,7 +217,7 @@ static void publishAuthRequest() {
 
   char payload[256];
   snprintf(payload, sizeof(payload),
-    "{\"msg_id\":\"REQ-AUTH-%04lu\",\"device_id\":\"%s\",\"mac_address\":\"%s\",\"secret_token\":\"HUIT_IOT_SECURE_TOKEN_N04\",\"timestamp\":%lu}",
+    "{\"msg_id\":\"REQ-AUTH-%04lu\",\"device_id\":\"%s\",\"mac_address\":\"%s\",\"secret_token\":\"HUIT_IOT_SECURE_TOKEN_N09\",\"timestamp\":%lu}",
     millis() / 1000,
     DEVICE_ID,
     g_macAddress,
@@ -262,7 +262,7 @@ static void onAuthResponse(const char* topic, const char* message) {
 
   const char* status = doc["status"] | "REJECTED";
   if (is(status, "PASS")) {
-    const char* sk = doc["session_key"] | "SK_AUTHORIZED_N04";
+    const char* sk = doc["session_key"] | "SK_AUTHORIZED_N09";
     strncpy(g_sessionKey, sk, sizeof(g_sessionKey) - 1);
     g_sessionKey[sizeof(g_sessionKey) - 1] = '\0';
     Serial.println(F("  [AUTH PASS] Server accepted device"));
@@ -447,11 +447,11 @@ static bool mqttConnect() {
 
   g_mqttClient.setSocketTimeout(2);
 
-  const char* lwtMsg = "{\"device_id\":\"ESP32_SMOKE_N04_A01\",\"status\":\"offline\",\"eventType\":\"LWT\"}";
+  const char* lwtMsg = "{\"device_id\":\"ESP32_SMOKE_N09_A01\",\"status\":\"offline\",\"eventType\":\"LWT\"}";
   if (g_mqttClient.connect(g_clientId, TOPIC_LWT, 1, true, lwtMsg)) {
     Serial.println(F("[MQTT] >>> CONNECTED SUCCESSFULLY! <<<"));
 
-    const char* onlineMsg = "{\"device_id\":\"ESP32_SMOKE_N04_A01\",\"status\":\"online\"}";
+    const char* onlineMsg = "{\"device_id\":\"ESP32_SMOKE_N09_A01\",\"status\":\"online\"}";
     g_mqttClient.publish(TOPIC_LWT, onlineMsg, true);
 
     g_mqttClient.subscribe("Nhom09/smoke/cmd/#", 1);

@@ -1,6 +1,6 @@
 # 🚨 Hệ Thống Báo Khói Cảnh Báo Sớm IoT (Early Smoke Detection & Warning System)
 
-> **Đề tài 04 - Nhóm 04 (N09)**  
+> **Đề tài: Hệ thống Báo khói Cảnh báo sớm — Nhóm 09 (N09) HUIT**  
 > **Nền tảng:** ESP32 (ESP32-WROOM-32D) | FreeRTOS / Arduino Framework  
 > **Giao thức:** MQTT (PubSubClient, ArduinoJson v7) | EMQX Public Broker  
 > **Mô phỏng & Giám sát:** Wokwi Simulator | Node-RED Dashboard | Web Realtime Dashboard  
@@ -202,5 +202,5 @@ E:\IoT\DoAn\
 ## 👥 9. Thông Tin Tác Giả & Bản Quyền
 
 - **Học phần:** Đồ Án Internet of Things (IoT)
-- **Đề tài 04:** Hệ thống báo khói cảnh báo sớm - Nhóm 04 (N09)
+- **Đề tài:** Hệ thống báo khói cảnh báo sớm - Nhóm 09 (N09) HUIT
 - **Giảng viên hướng dẫn:** Bộ môn IoT / Viễn thông

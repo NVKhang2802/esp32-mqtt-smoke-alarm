@@ -1,4 +1,4 @@
-# docs/audit/claims.yaml
+﻿# docs/audit/claims.yaml
 # 3-Tier Audit Matrix for IoT Smoke Detection System - Nhom 04 (N09) HUIT
 # Tiers:
 #   VERIFIED: Automated unit/integration test runs real shared code and validates 100% of the assertion.
@@ -81,3 +81,4 @@ claims:
     reality: "Automated script verifies topic prefix consistency (Nhom09/) across 4 layers: config.h, flows_smoke_detector.json, app.js, and mqttx_scenario_collection.json (62 topics checked)"
     evidence_tests: []
     test_command: "python scripts/verify_topic_prefix.py"
+

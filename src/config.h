@@ -11,7 +11,7 @@
 /**
  * @file config.h
  * @brief Tap trung toan bo cau hinh phan cung, tham so mang MQTT va hang so he thong
- * @details De tai 04: He thong bao khoi canh bao som - Nhom 04 (N09)
+ * @details De tai: He thong bao khoi canh bao som - Nhom 09 (N09) HUIT
  *          Tuan thu nguyen tac Clean Code: Zero Magic Numbers, PROGMEM constants.
  */
 
@@ -42,8 +42,8 @@ constexpr const char* WIFI_SSID          = "Wokwi-GUEST";
 constexpr const char* WIFI_PASS          = "";
 constexpr const char* MQTT_BROKER        = "broker.emqx.io";
 constexpr uint16_t    MQTT_PORT          = 1883;
-constexpr const char* MQTT_CLIENT_PREFIX = "ESP32_Smoke_Nhom04_";
-constexpr const char* DEVICE_ID          = "ESP32_SMOKE_N04_A01";
+constexpr const char* MQTT_CLIENT_PREFIX = "ESP32_Smoke_Nhom09_";
+constexpr const char* DEVICE_ID          = "ESP32_SMOKE_N09_A01";
 
 // ============================================================================
 // 4. MQTT TOPICS REGISTRY (NHOM09 ENTERPRISE ISOLATION)
@@ -64,10 +64,10 @@ constexpr const char* TOPIC_KEEP_ALIVE_V1    = "Nhom09/smoke/keep_alive";
 // V2 Enterprise Hierarchy (Slide 65 - ThS. Vo Hoang Hai)
 constexpr const char* TOPIC_V2_AUTH_REQ      = "Nhom09/smoke/v2/auth/request";
 constexpr const char* TOPIC_V2_AUTH_RESP     = "Nhom09/smoke/v2/auth/response/#";
-constexpr const char* TOPIC_V2_TELEMETRY     = "Nhom09/smoke/v2/HUIT_A/F03/P302/ESP32_SMOKE_N04_A01/telemetry";
-constexpr const char* TOPIC_V2_ALARM         = "Nhom09/smoke/v2/HUIT_A/F03/P302/ESP32_SMOKE_N04_A01/event/alarm";
-constexpr const char* TOPIC_V2_KEEP_ALIVE    = "Nhom09/smoke/v2/HUIT_A/F03/P302/ESP32_SMOKE_N04_A01/keep_alive";
-constexpr const char* TOPIC_V2_STATUS        = "Nhom09/smoke/v2/HUIT_A/F03/P302/ESP32_SMOKE_N04_A01/status";
+constexpr const char* TOPIC_V2_TELEMETRY     = "Nhom09/smoke/v2/HUIT_A/F03/P302/ESP32_SMOKE_N09_A01/telemetry";
+constexpr const char* TOPIC_V2_ALARM         = "Nhom09/smoke/v2/HUIT_A/F03/P302/ESP32_SMOKE_N09_A01/event/alarm";
+constexpr const char* TOPIC_V2_KEEP_ALIVE    = "Nhom09/smoke/v2/HUIT_A/F03/P302/ESP32_SMOKE_N09_A01/keep_alive";
+constexpr const char* TOPIC_V2_STATUS        = "Nhom09/smoke/v2/HUIT_A/F03/P302/ESP32_SMOKE_N09_A01/status";
 
 // ============================================================================
 // 5. TIMING CONSTANTS (IN MILLISECONDS)

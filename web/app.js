@@ -151,7 +151,7 @@ function initMqttClient() {
     return;
   }
 
-  const clientId = "WebClient_Smoke_N04_" + Math.random().toString(16).substring(2, 8);
+  const clientId = "WebClient_Smoke_N09_" + Math.random().toString(16).substring(2, 8);
   const connBadge = DOM.brokerConnBadge;
   const connText  = DOM.connStatusText;
 
@@ -931,7 +931,7 @@ function initEventHandlers() {
     DOM.btnTestTgAlert.addEventListener("click", () => {
       dispatchTelegramAlert(
         `🧪 <b>THỬ NGHIỆM KÊNH CẢNH BÁO TELEGRAM</b>\n` +
-        `Trạm: <code>ESP32_SMOKE_N04_A01</code>\n` +
+        `Trạm: <code>ESP32_SMOKE_N09_A01</code>\n` +
         `Thời gian: <code>${new Date().toLocaleString("vi-VN")}</code>\n` +
         `Trạng thái kết nối Webhook: <b>THÀNH CÔNG</b>`
       );

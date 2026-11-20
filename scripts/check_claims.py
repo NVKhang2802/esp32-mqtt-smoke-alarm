@@ -53,7 +53,7 @@ def collect_source_test_ids():
 
 def main():
     print("=" * 80)
-    print("  3-TIER AUDIT CLAIM VALIDATOR - NHOM 04 HUIT (CODEBASE AUDIT V5)")
+    print("  3-TIER AUDIT CLAIM VALIDATOR - NHOM 09 HUIT (CODEBASE AUDIT V5)")
     print("  Classification: [VERIFIED] Fully Proven | [PARTIAL] Algorithmic | [SCOPE] Design Boundary")
     print("  Source Code Validation: Checking test ID integrity against codebase...")
     print("=" * 80)

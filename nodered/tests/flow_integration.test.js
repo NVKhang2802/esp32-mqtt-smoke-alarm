@@ -69,35 +69,35 @@ test('FLOW-02: Auth populates fleet topology & Core Engine generates hierarchica
   const coreEngine = nodeMap.get('fn_core_fsm_engine');
   const cmdDispatcher = nodeMap.get('fn_command_dispatcher');
 
-  // Authenticate ESP32_SMOKE_N04_A01
+  // Authenticate ESP32_SMOKE_N09_A01
   const authReqA01 = {
     payload: {
-      device_id: 'ESP32_SMOKE_N04_A01',
+      device_id: 'ESP32_SMOKE_N09_A01',
       mac_address: '24:6F:28:AB:CD:10',
-      secret_token: 'HUIT_IOT_SECURE_TOKEN_N04'
+      secret_token: 'HUIT_IOT_SECURE_TOKEN_N09'
     }
   };
   const [authResp1] = runNodeFunction(authNode, authReqA01, flowCtx);
-  assert.equal(authResp1.topic, 'Nhom09/smoke/v2/auth/response/ESP32_SMOKE_N04_A01');
+  assert.equal(authResp1.topic, 'Nhom09/smoke/v2/auth/response/ESP32_SMOKE_N09_A01');
   const payload1 = JSON.parse(authResp1.payload);
   assert.equal(payload1.status, 'PASS');
 
   // Check flow context fleet has topology
   const fleet = flowCtx.get('fleet');
-  assert.ok(fleet['ESP32_SMOKE_N04_A01']);
-  assert.deepEqual(fleet['ESP32_SMOKE_N04_A01'].topology, {
+  assert.ok(fleet['ESP32_SMOKE_N09_A01']);
+  assert.deepEqual(fleet['ESP32_SMOKE_N09_A01'].topology, {
     building: 'HUIT_A',
     floor: 'F03',
     room: 'P302',
     zone: 'Phòng Lab IoT'
   });
 
-  // Authenticate ESP32_SMOKE_N04_A02
+  // Authenticate ESP32_SMOKE_N09_A02
   const authReqA02 = {
     payload: {
-      device_id: 'ESP32_SMOKE_N04_A02',
+      device_id: 'ESP32_SMOKE_N09_A02',
       mac_address: '24:6F:28:AB:CD:20',
-      secret_token: 'HUIT_IOT_SECURE_TOKEN_N04'
+      secret_token: 'HUIT_IOT_SECURE_TOKEN_N09'
     }
   };
   runNodeFunction(authNode, authReqA02, flowCtx);
@@ -106,7 +106,7 @@ test('FLOW-02: Auth populates fleet topology & Core Engine generates hierarchica
   const parseTelemetryNode = nodeMap.get('fn_parse_telemetry');
   const telemetryMsg = runNodeFunction(parseTelemetryNode, {
     payload: {
-      device_id: 'ESP32_SMOKE_N04_A01',
+      device_id: 'ESP32_SMOKE_N09_A01',
       mq2_ppm: 650.0,
       temp: 52.0,
       hum: 58.5,
@@ -126,14 +126,14 @@ test('FLOW-02: Auth populates fleet topology & Core Engine generates hierarchica
 
   // Check Rule 5 cross-zone broadcast generated a valid V2 command for A02
   assert.ok(cmds && cmds.length >= 2, 'Should emit fan command for A01 and cross-zone for A02');
-  const crossCmd = cmds.find(c => c.topic.includes('ESP32_SMOKE_N04_A02'));
-  assert.ok(crossCmd, 'Should have cross-zone evacuation command for ESP32_SMOKE_N04_A02');
-  assert.equal(crossCmd.topic, 'Nhom09/smoke/v2/HUIT_A/F03/P303/ESP32_SMOKE_N04_A02/cmd/buzzer');
+  const crossCmd = cmds.find(c => c.topic.includes('ESP32_SMOKE_N09_A02'));
+  assert.ok(crossCmd, 'Should have cross-zone evacuation command for ESP32_SMOKE_N09_A02');
+  assert.equal(crossCmd.topic, 'Nhom09/smoke/v2/HUIT_A/F03/P303/ESP32_SMOKE_N09_A02/cmd/buzzer');
 
   // Verify command dispatcher accepts topic without wildcard errors
   const dispatched = runNodeFunction(cmdDispatcher, crossCmd, flowCtx);
   assert.ok(dispatched, 'Command dispatcher must pass valid hierarchical topic');
-  assert.equal(dispatched.topic, 'Nhom09/smoke/v2/HUIT_A/F03/P303/ESP32_SMOKE_N04_A02/cmd/buzzer');
+  assert.equal(dispatched.topic, 'Nhom09/smoke/v2/HUIT_A/F03/P303/ESP32_SMOKE_N09_A02/cmd/buzzer');
 });
 
 test('FLOW-03: Scheduler inject & tick updates fleet Day/Night thresholds deterministically', () => {
@@ -141,7 +141,7 @@ test('FLOW-03: Scheduler inject & tick updates fleet Day/Night thresholds determ
   try {
     const flowCtx = createMockContext();
     flowCtx.set('fleet', {
-      ESP32_SMOKE_N04_A01: { deviceId: 'ESP32_SMOKE_N04_A01', alarmTh: 400, safeTh: 300 }
+      ESP32_SMOKE_N09_A01: { deviceId: 'ESP32_SMOKE_N09_A01', alarmTh: 400, safeTh: 300 }
     });
 
     const schedTick = nodeMap.get('fn_scheduler_tick');
@@ -157,7 +157,7 @@ test('FLOW-03: Scheduler inject & tick updates fleet Day/Night thresholds determ
     assert.equal(nightParsed.eventType, 'SCHEDULER_CMD');
     assert.equal(nightParsed.mode, 'NIGHT');
     runNodeFunction(coreEngine, nightParsed, flowCtx);
-    let dev = flowCtx.get('fleet')['ESP32_SMOKE_N04_A01'];
+    let dev = flowCtx.get('fleet')['ESP32_SMOKE_N09_A01'];
     assert.equal(dev.alarmTh, 350, 'NIGHT mode must set alarmTh to 350');
     assert.equal(dev.safeTh, 262.5, 'NIGHT mode must set safeTh to 262.5');
 
@@ -169,7 +169,7 @@ test('FLOW-03: Scheduler inject & tick updates fleet Day/Night thresholds determ
     assert.equal(dayParsed.eventType, 'SCHEDULER_CMD');
     assert.equal(dayParsed.mode, 'DAY');
     runNodeFunction(coreEngine, dayParsed, flowCtx);
-    dev = flowCtx.get('fleet')['ESP32_SMOKE_N04_A01'];
+    dev = flowCtx.get('fleet')['ESP32_SMOKE_N09_A01'];
     assert.equal(dev.alarmTh, 400, 'DAY mode must set alarmTh to 400');
     assert.equal(dev.safeTh, 300, 'DAY mode must set safeTh to 300');
   } finally {
@@ -183,7 +183,7 @@ test('FLOW-04: Alarm and keep-alive parsers deduplicate rapid duplicate payloads
   const parseKeepAlive = nodeMap.get('fn_parse_keepalive');
 
   const alarmPayload = {
-    device_id: 'ESP32_SMOKE_N04_A01',
+    device_id: 'ESP32_SMOKE_N09_A01',
     event: 'SMOKE_ALERT',
     ppm: 450,
     uptime_s: 120
@@ -197,7 +197,7 @@ test('FLOW-04: Alarm and keep-alive parsers deduplicate rapid duplicate payloads
   assert.equal(m2, null, 'Duplicate alarm event within 5s must be suppressed');
 
   const kaPayload = {
-    device_id: 'ESP32_SMOKE_N04_A01',
+    device_id: 'ESP32_SMOKE_N09_A01',
     uptime_sec: 120,
     free_heap_bytes: 180000
   };

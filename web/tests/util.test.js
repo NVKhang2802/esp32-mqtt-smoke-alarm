@@ -158,7 +158,7 @@ describe('Web SCADA Direct app.js Unit Tests', () => {
     STATE.health.mq2 = 'OK';
 
     const telemetryPayload = JSON.stringify({
-      device_id: 'ESP32_SMOKE_N04_A01',
+      device_id: 'ESP32_SMOKE_N09_A01',
       mq2_ppm: null,
       mq2_valid: false,
       dht_valid: true,

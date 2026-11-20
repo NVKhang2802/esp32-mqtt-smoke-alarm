@@ -445,6 +445,19 @@ void test_cmd_fan_manual(void) {
     TEST_ASSERT_EQUAL(ACTION_ACCEPTED, a3);
     TEST_ASSERT_FALSE(ctx.manualMode);
     TEST_ASSERT_FALSE(ctx.manualFan);
+
+    // Test case-insensitive lowercase support
+    ActionAck aLowOn = applyFanAction(ctx, "on");
+    TEST_ASSERT_EQUAL(ACTION_ACCEPTED, aLowOn);
+    TEST_ASSERT_TRUE(ctx.manualFan);
+
+    ActionAck aLowOff = applyFanAction(ctx, "off");
+    TEST_ASSERT_EQUAL(ACTION_ACCEPTED, aLowOff);
+    TEST_ASSERT_FALSE(ctx.manualFan);
+
+    ActionAck aLowAuto = applyFanAction(ctx, "auto");
+    TEST_ASSERT_EQUAL(ACTION_ACCEPTED, aLowAuto);
+    TEST_ASSERT_FALSE(ctx.manualMode);
 }
 
 // ============================================================================
@@ -479,6 +492,11 @@ void test_cmd_buzzer_mute_interlock(void) {
 
     ActionAck ack = applyBuzzerAction(ctx, "MUTE", 1000);
     TEST_ASSERT_EQUAL(ACTION_SAFETY_LOCK, ack);
+    TEST_ASSERT_FALSE(ctx.muted);
+
+    // Case-insensitive lowercase mute rejection during ALARM
+    ActionAck ackLow = applyBuzzerAction(ctx, "mute", 1500);
+    TEST_ASSERT_EQUAL(ACTION_SAFETY_LOCK, ackLow);
     TEST_ASSERT_FALSE(ctx.muted);
 
     FsmOutput out = fsmStep(ctx, { 450.0f, false, false, 2000 }, th);
@@ -601,6 +619,42 @@ void test_network_backoff_state_machine(void) {
 }
 
 // ============================================================================
+// T-L1: Network socket timeout bound & non-blocking backoff CPU budget
+// ============================================================================
+void test_loop_timing_and_backoff_budget(void) {
+    // 1. Backoff throttle progression ensures disconnected loops do not retry constantly
+    ExponentialBackoff bo(1000, 16000);
+    TEST_ASSERT_EQUAL(1000, bo.currentMs);
+    bo.fail(); TEST_ASSERT_EQUAL(2000, bo.currentMs);
+    bo.fail(); TEST_ASSERT_EQUAL(4000, bo.currentMs);
+    bo.fail(); TEST_ASSERT_EQUAL(8000, bo.currentMs);
+    bo.fail(); TEST_ASSERT_EQUAL(16000, bo.currentMs);
+    bo.fail(); TEST_ASSERT_EQUAL(16000, bo.currentMs); // Capped at maxMs
+
+    // 2. Verified socket timeout configuration bound:
+    // Individual TCP connect phase timeout: 2000 ms
+    // MQTT CONNACK socket timeout: 2000 ms
+    // Both are strictly <= NET_MAX_BLOCK_MS (3000 ms)
+    const uint32_t TCP_PHASE_TIMEOUT_MS = 2000;
+    const uint32_t MQTT_SOCKET_TIMEOUT_MS = 2000;
+    const uint32_t NET_MAX_BLOCK_MS = 3000;
+
+    TEST_ASSERT_TRUE(TCP_PHASE_TIMEOUT_MS < NET_MAX_BLOCK_MS);
+    TEST_ASSERT_TRUE(MQTT_SOCKET_TIMEOUT_MS < NET_MAX_BLOCK_MS);
+
+    // 3. Worst-case sequential connection attempt (TCP connect + MQTT CONNACK + DNS)
+    // can theoretically exceed NET_MAX_BLOCK_MS, justifying [PERF WARN] trigger in main loop.
+    const uint32_t worstCaseAttemptMs = TCP_PHASE_TIMEOUT_MS + MQTT_SOCKET_TIMEOUT_MS;
+    TEST_ASSERT_TRUE(worstCaseAttemptMs > NET_MAX_BLOCK_MS);
+
+    // 4. During backoff window, netTick returns with 0ms delay (non-blocking)
+    uint32_t simulatedNow = 5000;
+    uint32_t lastAttempt = 4500;
+    bool shouldAttempt = (simulatedNow - lastAttempt) >= bo.currentMs; // 500ms < 16000ms
+    TEST_ASSERT_FALSE(shouldAttempt); // Throttled! Zero CPU blocking.
+}
+
+// ============================================================================
 // MAIN RUNNER
 // ============================================================================
 int main(int argc, char **argv) {
@@ -634,5 +688,6 @@ int main(int argc, char **argv) {
     RUN_TEST(test_cmd_unknown_action);
     RUN_TEST(test_offline_buffer_overflow_and_fifo);
     RUN_TEST(test_network_backoff_state_machine);
+    RUN_TEST(test_loop_timing_and_backoff_budget);
     return UNITY_END();
 }

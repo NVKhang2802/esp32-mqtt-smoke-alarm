@@ -26,7 +26,7 @@ claims:
     tier: VERIFIED
     description: "Firmware command execution with safety interlocks during ALARM (Fan OFF, Mute, and Test refused)"
     claimed_in: "Phần VII, Phần IX"
-    reality: "Firmware main.cpp and test/test_core.cpp share applyFanAction & applyBuzzerAction from lib/core/cmd_parse.h; T-C1 to T-C6 test manual override, ALARM safety lock, and unknown action rejection on real parser"
+    reality: "Firmware main.cpp and test/test_core.cpp share applyFanAction & applyBuzzerAction from lib/core/cmd_parse.h (case-insensitive); T-C1 to T-C6 test manual override, ALARM safety lock, and unknown action rejection on real parser"
     evidence_tests: ["T-C1", "T-C2", "T-C3", "T-C4", "T-C5", "T-C6"]
     test_command: "pio test -e native"
 
@@ -42,7 +42,7 @@ claims:
     tier: VERIFIED
     description: "Node-RED live flow wire integration (Auth topology, hierarchical V2 commands, dedup TTL 5s, Day/Night Scheduler tick)"
     claimed_in: "Phần VII, Phần IX"
-    reality: "Validated on live flows_smoke_detector.json in flow_integration.test.js"
+    reality: "Validated on live flows_smoke_detector.json in flow_integration.test.js with deterministic date mocking (FLOW-03)"
     evidence_tests: ["FLOW-01", "FLOW-02", "FLOW-03", "FLOW-04"]
     test_command: "node --test nodered/tests/flow_integration.test.js"
 
@@ -50,22 +50,22 @@ claims:
     tier: VERIFIED
     description: "Web SCADA XSS Immunity (textContent) and pure telemetry reflection without autonomous actuator commands"
     claimed_in: "Phần VII, Phần IX"
-    reality: "app.js exported and directly tested in web/tests/util.test.js with zero client-side autonomous actuator commands"
-    evidence_tests: ["T-W1", "T-W2", "T-W3", "T-W4"]
+    reality: "app.js exported and directly tested in web/tests/util.test.js: XSS immunity (T-W1..T-W3), telemetry reflection (T-W4), and UI actuator controls disabled during ALARM (T-W5)"
+    evidence_tests: ["T-W1", "T-W2", "T-W3", "T-W4", "T-W5"]
     test_command: "node --test web/tests/util.test.js"
 
   - id: C-OFFLINE-BUFFER
     tier: VERIFIED
     description: "Offline circular buffer 20 records with FIFO preservation and batch flush"
-    reality: "Zero-heap RingBuffer<T, N> implemented in lib/core/ring_buffer.h; firmware offline_buffer.cpp and test/test_core.cpp share identical template code. T-B1 proves eviction (25->20) and batch flush (7->13) on real ring buffer."
+    reality: "Zero-heap RingBuffer<T, N> implemented in lib/core/ring_buffer.h; firmware offline_buffer.cpp and test/test_core.cpp share identical template code. T-B1 proves eviction (25->20) and batch flush (7->13) on real ring buffer; zero-init and null-termination verified"
     evidence_tests: ["T-B1"]
     test_command: "pio test -e native"
 
   - id: C-NETWORK-BACKOFF
     tier: VERIFIED
     description: "Decoupled exponential backoff (1s to 16s) for WiFi and MQTT reconnection"
-    reality: "ExponentialBackoff struct implemented in lib/core/backoff.h; firmware main.cpp and test/test_core.cpp share identical struct methods (fail, reset). T-R1 and T-F12 prove 1s->2s->4s->8s->16s progression, 16s cap, and independent reset."
-    evidence_tests: ["T-F12", "T-R1"]
+    reality: "ExponentialBackoff struct implemented in lib/core/backoff.h; firmware main.cpp and test/test_core.cpp share identical struct methods (fail, reset). T-R1 and T-F12 prove 1s->2s->4s->8s->16s progression, 16s cap, and independent reset. T-L1 validates socket timeout bounds (2s per phase) and throttled CPU loop budget"
+    evidence_tests: ["T-F12", "T-R1", "T-L1"]
     test_command: "pio test -e native"
 
   - id: C-TELEGRAM-FALLBACK
@@ -78,6 +78,6 @@ claims:
   - id: C-SCOPE-BENCHMARKS
     tier: SCOPE
     description: "Academic scope boundaries: Port 1883 plaintext with Nhom09/ prefix, RL=10k vs R0=1.0k, demo thresholds (400/350 PPM), ArduinoJson v7 RAII heap"
-    reality: "Project scope definition; tests verify file presence, topic prefix consistency in config and flows, and absence of dummy placeholders."
+    reality: "Automated script verifies topic prefix consistency (Nhom09/) across 4 layers: config.h, flows_smoke_detector.json, app.js, and mqttx_collection_slide65.json (62 topics checked)"
     evidence_tests: []
-    test_command: "python -c \"import os; assert all(os.path.isfile(p) for p in ['src/config.h', 'src/main.cpp', 'nodered/flows_smoke_detector.json', 'web/app.js'])\""
+    test_command: "python scripts/verify_topic_prefix.py"

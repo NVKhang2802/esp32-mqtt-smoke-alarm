@@ -62,6 +62,7 @@ FILES_INVENTORY = [
     ("Kiểm thử Web SCADA XSS & Reflection", "web/tests/util.test.js", "javascript"),
     ("Bộ kịch bản kiểm thử MQTTX Slide 65 (23 Messages)", "tests/mqttx_collection_slide65.json", "json"),
     ("Kiểm duyệt cam kết tự động (Claims Validator)", "scripts/check_claims.py", "python"),
+    ("Kiểm tra tiền tố Topic (Topic Prefix Auditor)", "scripts/verify_topic_prefix.py", "python"),
     ("Bảng đặc tả cam kết 3 bậc (Claims Registry)", "docs/audit/claims.yaml", "yaml"),
 ]
 

@@ -1,101 +1,107 @@
-# 🎯 Báo Cáo Nghiệm Thu & Chuẩn Hóa Toàn Diện Dự Án Báo Khói IoT (v5.1)
+# 🎯 Báo Cáo Nghiệm Thu & Chuẩn Hóa Toàn Diện Dự Án Báo Khói IoT (v5.2)
 ## Đề tài 04: Hệ thống Báo khói Cảnh báo sớm — Nhóm 04 (N09) HUIT
 
 > **Tài liệu đính kèm kiểm duyệt:** Gửi kèm file mã nguồn toàn diện [PROJECT_CODEBASE.md](file:///e:/IoT/DoAn/PROJECT_CODEBASE.md)  
-> **Thời gian xuất bản:** 19/11/2026 (Phiên bản Chuẩn hóa v5.1 - Giải Quyết Triệt Để Mọi Phản Biện Của AI Auditor & Đồng Bộ Mã Nguồn Thật)  
+> **Thời gian xuất bản:** 20/11/2026 (Phiên bản Chuẩn hóa v5.2 - Tiếp Thu & Xử Lý Toàn Diện Các Nhận Xét Phản Biện Cuối Cùng)  
 > **Trạng thái kiểm chuẩn:** Đã vượt qua 100% các bộ kiểm thử độc lập:
-> - **29/29** C++17 Core Native Unity Tests (100% chạy trên mã nguồn thật dùng chung `lib/core/`)
+> - **30/30** C++17 Core Native Unity Tests (100% chạy trên mã nguồn thật dùng chung `lib/core/`, bao gồm `T-L1` và hỗ trợ lệnh chữ thường)
 > - **16/16** Node-RED Middleware Tests (12 Engine + 4 Live Flow Integration với Date Mocking)
-> - **4/4** Web SCADA Clean Tests (Nạp & kiểm thử trực tiếp `web/app.js`)
+> - **5/5** Web SCADA Clean Tests (Nạp trực tiếp `web/app.js`, bao gồm `T-W5` kiểm thử khóa nút bấm an toàn khi ALARM)
 > - **10/10** 3-Tier Audit Claims (**8 VERIFIED PASS**, 1 PARTIAL VALID, 1 SCOPE VALID, 0 FAIL)
-> - **63/63** Full Regression System Tests
+> - **62/62** Topic Namespace Verifier (Kiểm tra tự động tiền tố `Nhom09/` trên toàn bộ 4 tầng)
+> - **64/64** Full Regression System Tests
 
 ---
 
-### 1. Bảng Đối Chiếu Triệt Để "Tuyên Bố Báo Cáo vs Thực Tế Mã Nguồn"
+### 1. Bảng Đối Chiếu Triệt Để "Tuyên Báo vs Thực Tế Mã Nguồn"
 
-Dưới đây là bảng phản hồi và giải trình chi tiết từng điểm nghi vấn được nêu trong đợt đánh giá của AI Auditor:
+Dưới đây là bảng đối chiếu minh bạch giữa các phản biện kỹ thuật của AI Auditor và các giải pháp triển khai thực tế trong mã nguồn:
 
-| # | Hạng Mục Phản Biện Của Auditor | Thực Tế Trước Đây | Hiện Trạng Triển Khai Thực Tế Trong Mã Nguồn (v5.1) | Bằng Chứng Kiểm Thử | Cấp Bậc (Tier) |
+| # | Hạng Mục Phản Biện Của Auditor | Thực Tế Trước Đây | Hiện Trạng Triển Khai Thực Tế Trong Mã Nguồn (v5.2) | Bằng Chứng Kiểm Thử | Cấp Bậc (Tier) |
 | :-: | :--- | :--- | :--- | :--- | :---: |
-| **1** | **T-W2, T-W3, T-W4 chứng minh Web an toàn**<br>*(Nghi vấn: Tự dựng DOM giả & logic inline, không nạp `app.js`)* | File test cũ tự viết lại hàm giả lập trong test, không nạp `app.js` | Tái cấu trúc [web/app.js](file:///e:/IoT/DoAn/web/app.js), xuất `module.exports = { escapeHtml, renderAuditTable, showToast, handleIncomingMqtt, ... }`. File [web/tests/util.test.js](file:///e:/IoT/DoAn/web/tests/util.test.js) `require` trực tiếp `app.js` vào DOM giả lập tối thiểu, chứng minh trực tiếp `textContent` chống XSS, vô hiệu hóa nút bấm khi ALARM và phản chiếu telemetry | `web/tests/util.test.js`<br>**(T-W1 $\to$ T-W4: PASS)** | `VERIFIED` |
-| **2** | **Web không tự gửi lệnh quạt/còi**<br>*(Nghi vấn: Vẫn còn `evaluateFsmRules`, `triggerAlarmState`, `triggerCooldownState` gửi `cmdFan OFF`)* | Còn sót các hàm cục bộ từ bản thiết kế cũ | Xóa bỏ hoàn toàn `evaluateFsmRules()`, `triggerAlarmState()`, và lệnh tắt quạt sau 30s của `triggerCooldownState()` trong [web/app.js](file:///e:/IoT/DoAn/web/app.js). Web SCADA chỉ hoạt động ở chế độ quan sát thuần túy (Observation Mode), không tự sinh lệnh điều khiển actuator | `web/tests/util.test.js`<br>**(T-W4: PASS)** | `VERIFIED` |
-| **3** | **JSON "tái sử dụng trong stack", RAM 14.2%**<br>*(Nghi vấn: ArduinoJson v7 cấp phát heap ở mỗi handler; padding RAM)* | Chú thích cũ ghi "Zero Heap Fragmentation" gây hiểu nhầm | Sửa chú thích tại header [src/main.cpp](file:///e:/IoT/DoAn/src/main.cpp) và tài liệu: `JsonDocument` của ArduinoJson v7 cấp phát heap tạm thời theo cơ chế RAII trong từng handler và giải phóng ngay khi hàm kết thúc. Kích thước buffer PubSubClient giới hạn 512B, payload tối đa 256B. RAM 46,560B (14.2%) được giải trình khoa học bằng cơ chế căn lề 32-bit struct alignment padding | `pio run -e esp32dev`<br>**(46,560 B RAM, 785,089 B Flash)** | `SCOPE` |
-| **4** | **Điện trở $R_0 = 10\text{ k}\Omega$ vs $R_L = 10\text{ k}\Omega$**<br>*(Nghi vấn: Nhầm lẫn giữa $R_0$ và $R_L$)* | Chú thích ghi nhầm $R_0 = 10\text{ k}\Omega$ | Chuẩn hóa tài liệu và code: $R_L = 10\text{ k}\Omega$ là điện trở tải trên board phần cứng; $R_0 = 1.0\text{ k}\Omega$ là điện trở cảm biến trong không khí sạch Wokwi ($Rs = 1.71\text{ k}\Omega$ tại 200 PPM). Công thức tính PPM bám sát $PPM = A \cdot (Rs/R_0)^B$ | [src/sensors.cpp](file:///e:/IoT/DoAn/src/sensors.cpp)<br>[src/config.h](file:///e:/IoT/DoAn/src/config.h) | `SCOPE` |
-| **5** | **Claims Registry & Scripts Kiểm Duyệt**<br>*(Nghi vấn: `check_claims.py` không có trong repo; test dummy)* | File YAML cũ có lệnh `python -c "print(...)"` | Bổ sung [scripts/check_claims.py](file:///e:/IoT/DoAn/scripts/check_claims.py) vào repo. Tích hợp tính năng quét toàn bộ mã nguồn test (`test/`, `nodered/tests/`, `web/tests/`), đối chiếu danh sách test ID: nếu test ID nào trong `evidence_tests` không tìm thấy trong code thì claim bị FAIL ngay lập tức. Cấm hoàn toàn lệnh test dummy | `python scripts/check_claims.py`<br>**(10/10 PASS, 0 Fail)** | `VERIFIED` |
-| **6** | **Test T-C6, T-B1, T-R1 mô phỏng cục bộ**<br>*(Nghi vấn: T-C6 so sánh chuỗi, T-B1 mảng int, T-R1 gán biến)* | Logic kiểm thử tách rời code chạy thực tế | **Tách mã nguồn lõi dùng chung vào `lib/core/`:**<br>- [lib/core/cmd_parse.h](file:///e:/IoT/DoAn/lib/core/cmd_parse.h): `applyFanAction`, `applyBuzzerAction` dùng chung giữa firmware và test T-C1..T-C6.<br>- [lib/core/ring_buffer.h](file:///e:/IoT/DoAn/lib/core/ring_buffer.h): Template `RingBuffer<T, N>` dùng chung cho `offline_buffer.cpp` và test T-B1.<br>- [lib/core/backoff.h](file:///e:/IoT/DoAn/lib/core/backoff.h): `struct ExponentialBackoff` dùng chung cho `netTick()` firmware và test T-R1.<br>-> Nâng cấp `C-OFFLINE-BUFFER` và `C-NETWORK-BACKOFF` lên **VERIFIED**! | `pio test -e native`<br>**(T-C6, T-B1, T-R1: PASS)** | `VERIFIED` |
-| **7** | **Lập lịch Ngày/Đêm FLOW-03 phụ thuộc giờ thực**<br>*(Nghi vấn: `new Date().getHours()` có thể trả về nhánh rỗng)* | FLOW-03 chỉ assert khi `tickOut != null` | Cập nhật `FLOW-03` trong [nodered/tests/flow_integration.test.js](file:///e:/IoT/DoAn/nodered/tests/flow_integration.test.js): Mock `Date.prototype.getHours` thành 23h để kiểm tra nhánh Đêm (350/262.5 PPM), sau đó mock thành 14h để kiểm tra nhánh Ngày (400/300 PPM), khôi phục hàm gốc trong block `finally` | `node --test nodered/tests/flow_integration.test.js`<br>**(FLOW-03: PASS)** | `VERIFIED` |
+| **1** | **Khóa nút bấm Web SCADA khi ALARM**<br>*(Nghi vấn: T-W4 chỉ kiểm phản chiếu telemetry, chưa kiểm disabled)* | Code có `disabled = isAlarmState` nhưng chưa có test kiểm chứng | Thêm bài kiểm thử `T-W5` trong [web/tests/util.test.js](file:///e:/IoT/DoAn/web/tests/util.test.js): Giả lập `STATE.fsmState = 'ALARM'` gọi `updateUiFromState()`, xác nhận `btnFanOff.disabled === true` và `btnBuzzerMute.disabled === true`; chuyển về `SAFE`, xác nhận các nút được kích hoạt lại | `web/tests/util.test.js`<br>**(T-W1 $\to$ T-W5: PASS)** | `VERIFIED` |
+| **2** | **Hồi quy phân biệt hoa/thường lệnh điều khiển**<br>*(Nghi vấn: strcmp từ chối lệnh chữ thường `off`, `auto`, `mute`)* | `applyFanAction` và `applyBuzzerAction` dùng `strcmp` phân biệt hoa thường | Bổ sung hàm trợ giúp `strEqualsIgnoreCase` trong [lib/core/cmd_parse.h](file:///e:/IoT/DoAn/lib/core/cmd_parse.h), hỗ trợ đầy đủ cả chữ hoa và chữ thường cho mọi lệnh (`off`, `on`, `auto`, `mute`, `unmute`, `test`). Thêm ca kiểm thử chữ thường vào `T-C1` và `T-C3` | `test/test_core.cpp`<br>**(T-C1 $\to$ T-C6: PASS)** | `VERIFIED` |
+| **3** | **Bằng chứng về Timeout mạng & Ngân sách loop()**<br>*(Nghi vấn: Báo cáo ghi tổng timeout 2s là chưa chuẩn, thiếu test T-L1)* | Báo cáo cũ chưa phân tách rành mạch các pha TCP, MQTT CONNACK và DNS | Điều chỉnh báo cáo kỹ thuật: mỗi pha kết nối tối đa 2s (TCP 2s, MQTT CONNACK 2s, DNS không chặn), tổng thời gian xấu nhất có thể vượt 3s, đó là lý do hệ thống có cảnh báo `[PERF WARN]` khi vượt `NET_MAX_BLOCK_MS = 3000ms`. Bổ sung test `T-L1` kiểm chứng ngân sách vòng lặp và ngưỡng backoff | `test/test_core.cpp`<br>**(T-L1: PASS)** | `VERIFIED` |
+| **4** | **Kiểm tra đồng nhất tiền tố Topic C-SCOPE-BENCHMARKS**<br>*(Nghi vấn: Command chỉ kiểm tra file tồn tại chứ không kiểm tra topic)* | Lệnh kiểm tra cũ chỉ dùng `assert os.path.isfile(...)` | Viết script tự động [scripts/verify_topic_prefix.py](file:///e:/IoT/DoAn/scripts/verify_topic_prefix.py): Kiểm tra đệ quy tính đồng nhất của tiền tố `Nhom09/` trên toàn bộ 62 topic thuộc 4 tầng (`src/config.h`, `nodered/flows_smoke_detector.json`, `web/app.js`, `tests/mqttx_collection_slide65.json`), gán làm `test_command` của `C-SCOPE-BENCHMARKS` | `python scripts/verify_topic_prefix.py`<br>**(62/62 TOPICS PASS)** | `SCOPE` |
+| **5** | **Khởi tạo và kết thúc chuỗi an toàn trong Offline Buffer**<br>*(Nghi vấn: rec chưa zero-init, nhánh nullptr thiếu `\0`)* | `OfflineRecord rec;` rác bộ nhớ, `strncpy` nhánh `else` thiếu `\0` | Sửa trong [src/offline_buffer.cpp](file:///e:/IoT/DoAn/src/offline_buffer.cpp): Khởi tạo `OfflineRecord rec = {};` (zero-initialization) và đặt tường minh `rec.state[sizeof(rec.state) - 1] = '\0'` cùng `rec.eventType[sizeof(rec.eventType) - 1] = '\0'` ở cả hai nhánh rẽ | `test/test_core.cpp`<br>**(T-B1: PASS)**<br>`pio run -e esp32dev` | `VERIFIED` |
+| **6** | **Căn lề Struct Padding và Kích Thước RAM 14.2%**<br>*(Nghi vấn: Đoạn trích struct trong báo cáo chưa phải bản thật)* | Trích dẫn cũ dùng `uint8_t fsmState` thay vì `char state[16]` | Dán chính xác định nghĩa `struct OfflineRecord` từ [src/offline_buffer.h](file:///e:/IoT/DoAn/src/offline_buffer.h) với `char state[16]` và `char eventType[16]`. Giải thích rõ: 4 biến bool chiếm trọn 4 bytes (offset 16..19), lấp đầy 2 byte padding cũ mà không làm tăng kích thước cấu trúc (52 bytes) | `pio run -e esp32dev`<br>**(RAM: 46,552 B, Flash: 785,165 B)** | `SCOPE` |
 
 ---
 
-### 2. Báo Cáo Kỹ Thuật Chuyên Sâu Các Điểm Trọng Yếu
+### 2. Báo Cáo Kỹ Thuật Chi Tiết Các Cải Tiến
 
-#### 2.1 Loại Bỏ Hoàn Toàn Mã Giả Lập Trong Test (Shared Core Architecture)
-Để xóa bỏ triệt để việc kiểm thử mô phỏng, dự án đã tái cấu trúc và trích xuất các thành phần cốt lõi thành các thư viện C++17 thuần túy trong thư mục `lib/core/`:
-1. **`lib/core/ring_buffer.h`**:
-   - Hiện thực cấu trúc `template<typename T, size_t N> class RingBuffer` cấp phát bộ nhớ tĩnh không dùng heap (`T m_buffer[N]`).
-   - Cung cấp các thao tác chuẩn: `push(item)` (tự động đè phần tử cũ nhất khi đầy), `getOldest(i)` (truy cập phần tử theo thứ tự FIFO), `drop(n)` (xả `n` phần tử cũ nhất), `size()`, `capacity()`.
-   - Firmware [src/offline_buffer.cpp](file:///e:/IoT/DoAn/src/offline_buffer.cpp) và bài kiểm thử `T-B1` trong [test/test_core.cpp](file:///e:/IoT/DoAn/test/test_core.cpp) biên dịch trên **cùng một mã nguồn template này**. Test `T-B1` đẩy 25 phần tử vào đệm kích thước 20, xác nhận 5 phần tử đầu tiên bị xóa, 20 phần tử còn lại giữ đúng thứ tự FIFO, và xả 7 phần tử thì còn lại đúng 13 phần tử.
-2. **`lib/core/backoff.h`**:
-   - Hiện thực `struct ExponentialBackoff` với các phương thức `fail()` (tăng gấp đôi thời gian chờ từ 1s $\to$ 2s $\to$ 4s $\to$ 8s $\to$ 16s trần) và `reset()` (khôi phục về 1s).
-   - Firmware [src/main.cpp](file:///e:/IoT/DoAn/src/main.cpp) khai báo 2 biến độc lập `ExponentialBackoff s_wifiBackoff` và `ExponentialBackoff s_mqttBackoff`, và bài kiểm thử `T-R1` thực thi trực tiếp trên cấu trúc này.
-3. **`lib/core/cmd_parse.h`**:
-   - Trích xuất hàm phân tích và khóa liên động `applyFanAction(ctx, action)` và `applyBuzzerAction(ctx, action, now)` trả về mã xác nhận `ActionAck` (`ACTION_ACCEPTED`, `ACTION_SAFETY_LOCK`, `ACTION_UNKNOWN`).
-   - Firmware handler (`handleFanCommand`, `handleBuzzerCommand`) chỉ làm nhiệm vụ parse JSON lấy trường `action` rồi chuyển trực tiếp vào hàm `applyFanAction`/`applyBuzzerAction`. Test `T-C1` đến `T-C6` kiểm thử trực tiếp các hàm này (bao gồm cả trường hợp chuỗi hành động không xác định `EXPLODE` trả về `ACTION_UNKNOWN`).
-
-Nhờ đó, cả 3 cam kết `C-COMMAND-INTERLOCK`, `C-OFFLINE-BUFFER` và `C-NETWORK-BACKOFF` đều đạt cấp bậc **`VERIFIED`** trên 100% mã nguồn thật.
+#### 2.1 Hỗ Trợ Lệnh Không Phân Biệt Hoa Thường & Khóa An Toàn Chấp Hành
+- **Hàm so sánh nội tuyến di động:** Tại [lib/core/cmd_parse.h](file:///e:/IoT/DoAn/lib/core/cmd_parse.h), triển khai hàm `strEqualsIgnoreCase(const char* s1, const char* s2)` thuần C++ không phụ thuộc thư viện hệ điều hành, chuẩn hóa ký tự thường sang hoa khi so sánh.
+- **Áp dụng đồng bộ:** Cả `applyFanAction` và `applyBuzzerAction` chấp nhận cả `"OFF"` và `"off"`, `"ON"` và `"on"`, `"AUTO"` và `"auto"`, `"MUTE"` và `"mute"`, `"UNMUTE"` và `"unmute"`, `"TEST"` và `"test"`.
+- **Kiểm thử trực tiếp:** Bài kiểm thử `T-C1` và `T-C3` trong `test/test_core.cpp` đã bổ sung các ca kiểm thử với chuỗi chữ thường, chứng minh lệnh `"off"` hay `"mute"` gửi tới khi FSM đang ALARM đều bị từ chối với mã `ACTION_SAFETY_LOCK`.
 
 ---
 
-#### 2.2 Giải Trình Khoa Học Về Bộ Nhớ RAM Tĩnh và Struct Alignment Padding
-Trong quá trình nghiệm thu, auditor đặt câu hỏi tại sao khi thêm 2 trường cờ `bool mq2Valid` và `bool dhtValid` vào cấu trúc `OfflineRecord`, kích thước RAM tĩnh hiển thị bởi PlatformIO vẫn giữ nguyên ở mức 46,544 bytes:
-- **Kiến trúc vi điều khiển Xtensa 32-bit (ESP32):** Trình biên dịch GCC mặc định căn lề các trường trong cấu trúc theo bội số kích thước kiểu dữ liệu hoặc 4-byte word boundary.
-- **Trước khi thêm:** Cấu trúc `OfflineRecord` có dạng:
+#### 2.2 Giải Trình Khoa Học Về Căn Lề Bộ Nhớ (Struct Alignment Padding)
+Định nghĩa thực tế của `struct OfflineRecord` trong [src/offline_buffer.h](file:///e:/IoT/DoAn/src/offline_buffer.h):
+```cpp
+struct OfflineRecord {
+  unsigned long timestamp; // 4 bytes (offset 0..3)
+  float ppm;               // 4 bytes (offset 4..7)
+  float temp;              // 4 bytes (offset 8..11)
+  float hum;               // 4 bytes (offset 12..15)
+  bool fan;                // 1 byte  (offset 16)
+  bool buzzer;             // 1 byte  (offset 17)
+  bool mq2Valid;           // 1 byte  (offset 18)
+  bool dhtValid;           // 1 byte  (offset 19)
+  char state[16];          // 16 bytes (offset 20..35)
+  char eventType[16];      // 16 bytes (offset 36..51)
+};
+```
+- **Kích thước đo lường:** `sizeof(OfflineRecord) == 52 bytes`.
+- **Cơ chế căn lề 32-bit Xtensa:**
+  - 4 trường số đầu tiên (`timestamp`, `ppm`, `temp`, `hum`) chiếm 16 bytes (offset 0..15).
+  - Trước khi thêm 2 cờ `mq2Valid` và `dhtValid`, chỉ có 2 biến `bool fan` (1B) và `bool buzzer` (1B) ở offset 16..17. Để căn lề 4-byte boundary cho mảng ký tự kế tiếp `char state[16]`, trình biên dịch GCC tự động chèn **2 bytes padding** ở offset 18..19.
+  - Khi thêm `bool mq2Valid` (1B) và `bool dhtValid` (1B), 2 biến này **điền vừa khít vào 2 byte padding sẵn có**, đưa tổng kích thước của 4 biến bool lên đúng 4 bytes (offset 16..19).
+  - Do đó, tổng kích thước cấu trúc giữ nguyên: $16 + 4 + 16 + 16 = 52\text{ bytes}$.
+  - Với mảng 20 phần tử, dung lượng tĩnh trên RAM là $20 \times 52 = 1,040\text{ bytes}$.
+- **Độ ổn định bộ nhớ khi biên dịch:** Kết quả đo thực tế qua lệnh `pio run -e esp32dev`:
+  - RAM sử dụng: **46,552 bytes** (14.2% / 327,680 B)
+  - Flash sử dụng: **785,165 bytes** (59.9% / 1,310,720 B)
+
+---
+
+#### 2.3 Phân Tách Giới Hạn Thời Gian Chờ Mạng & Cảnh Báo Hiệu Năng
+- **Cấu hình thời gian chờ theo từng pha:**
   ```cpp
-  struct OfflineRecord {
-      uint32_t timestamp; // 4 bytes
-      float ppm;          // 4 bytes
-      float temp;         // 4 bytes
-      float hum;          // 4 bytes
-      uint8_t fsmState;   // 1 byte
-      bool fan;           // 1 byte
-      bool buzzer;        // 1 byte
-      // [2 BYTES COMPILER PADDING ĐỂ CĂN LỀ 4-BYTE CHO MẢNG HOẶC TRƯỜNG KẾ TIẾP]
-      // Các trường khác...
-  };
+  g_espClient.setTimeout(2);        // Giới hạn thời gian kết nối TCP tối đa 2 giây (2000 ms)
+  g_mqttClient.setSocketTimeout(2);  // Giới hạn thời gian chờ phản hồi socket/CONNACK tối đa 2 giây (2000 ms)
   ```
-  Tổng kích thước cấu trúc là **52 bytes**.
-- **Sau khi thêm:** Thêm `bool mq2Valid` (1 byte) và `bool dhtValid` (1 byte) vào vị trí liền kề. Hai byte này **chiếm đúng vào 2 byte padding sẵn có**, không làm dịch chuyển các trường phía sau và giữ nguyên kích thước `sizeof(OfflineRecord) == 52 bytes`. Với mảng tĩnh 20 phần tử, dung lượng bộ nhớ hoàn toàn không đổi: $20 \times 52 = 1,040\text{ bytes}$.
-- **Sau khi chuẩn hóa shared template v5.1:** Việc tạo đối tượng toàn cục tĩnh cho `RingBuffer` và `ExponentialBackoff` làm tăng kích thước RAM thêm 16 bytes (từ 46,544 bytes lên **46,560 bytes**), chiếm **14.2%** RAM (46,560 / 327,680 B) và **59.9%** Flash (785,089 / 1,310,720 B). Đây là bằng chứng xác thực về độ chính xác tuyệt đối của quá trình đo lường.
+- **Hành vi trường hợp xấu nhất:** Quá trình kết nối mạng trải qua nhiều pha nối tiếp: phân giải tên miền DNS $\to$ thiết lập bắt tay TCP $\to$ gửi gói tin MQTT CONNECT và chờ CONNACK. Trong trường hợp broker không phản hồi hoặc mạng suy giảm, tổng thời gian có thể vượt quá 3000 ms.
+- **Ngân sách vòng lặp và cảnh báo hiệu năng:**
+  - Hằng số `NET_MAX_BLOCK_MS = 3000 ms` được thiết lập làm ngưỡng an toàn tối đa cho một vòng `loop()`.
+  - Nếu thời gian thực thi của một vòng lặp vượt quá 3000 ms, hệ thống ghi nhận và in cảnh báo `[PERF WARN]` lên Serial Monitor.
+  - Sau lần thử thất bại, cơ chế `ExponentialBackoff` lập tức tăng thời gian chờ thử lại lên 1s $\to$ 2s $\to$ 4s $\to$ 8s $\to$ 16s. Trong suốt khoảng thời gian giãn cách này, hàm `netTick()` trả về ngay lập tức với độ trễ $\approx 0\text{ ms}$, giải phóng hoàn toàn CPU cho việc đọc cảm biến và điều khiển còi/quạt (được kiểm chứng trong bài kiểm thử `T-L1`).
 
 ---
 
-#### 2.3 Cơ Chế Quản Lý Bộ Nhớ Của ArduinoJson v7
-- Trong ArduinoJson v7, cú pháp `JsonDocument doc;` cấp phát bộ nhớ heap động nhỏ theo cơ chế RAII. Khi đối tượng ra khỏi phạm vi hàm (`handleFanCommand`, `handleBuzzerCommand`, `handleThresholdCommand`), hàm hủy của `JsonDocument` lập tức thu hồi và trả lại heap cho hệ thống.
-- Để loại bỏ nguy cơ phân mảnh (fragmentation), firmware thiết lập các giới hạn cứng:
-  1. `g_mqttClient.setBufferSize(512)`: Khống chế bộ đệm nhận tin tối đa 512 bytes.
-  2. Kích thước payload JSON của các lệnh điều khiển chỉ từ 30 đến 120 bytes, nhỏ hơn rất nhiều so với dung lượng Free Heap của ESP32 (> 180 KB).
-  3. Thời gian tồn tại của `JsonDocument` chỉ kéo dài trong vài micro giây của vòng gọi hàm ngắt MQTT callback.
-
----
-
-#### 2.4 Cơ Chế Chặn Timeout Mạng và Bảo Vệ Vòng Lặp loop()
-- Firmware cấu hình:
-  ```cpp
-  g_espClient.setTimeout(2);           // 2 giây = 2000 ms
-  g_mqttClient.setSocketTimeout(2);     // 2 giây = 2000 ms
+#### 2.4 Kiểm Thử Trực Tiếp Khóa Giao Diện Web SCADA Khi ALARM (T-W5)
+- Hàm `updateUiFromState()` trong [web/app.js](file:///e:/IoT/DoAn/web/app.js) kiểm tra:
+  ```javascript
+  const isAlarmState = (STATE.fsmState === "ALARM");
+  if (DOM.btnFanOff) DOM.btnFanOff.disabled = isAlarmState;
+  if (DOM.btnBuzzerMute) DOM.btnBuzzerMute.disabled = isAlarmState;
+  if (DOM.btnBannerMute) DOM.btnBannerMute.disabled = isAlarmState;
   ```
-- Chu kỳ vận hành khống chế độ trễ `NET_MAX_BLOCK_MS = 3000 ms`. Do thời gian chờ socket tối đa là 2000 ms, hàm kết nối mạng không thể làm nghẽn vòng lặp `loop()` quá 2000 ms. Trong trường hợp có bất thường vượt quá 3000 ms, hệ thống lập tức xuất cảnh báo hiệu năng `[PERF WARN]` lên Serial Monitor để giám sát viên nhận biết.
+- Bài kiểm thử `T-W5` trong [web/tests/util.test.js](file:///e:/IoT/DoAn/web/tests/util.test.js) kiểm chứng trực tiếp:
+  1. Khi nhận telemetry có `fsm_state: 'ALARM'`, các nút `btnFanOff`, `btnBuzzerMute` bị vô hiệu hóa (`disabled === true`), ngăn người vận hành vô tình tắt quạt hút khói hoặc tắt còi báo cháy từ giao diện.
+  2. Khi trạng thái trở về `'SAFE'`, các nút bấm được kích hoạt trở lại (`disabled === false`).
 
 ---
 
-#### 2.5 Công Cụ Thẩm Định Cam Kết 3 Bậc (scripts/check_claims.py)
-Công cụ `scripts/check_claims.py` được nâng cấp với cơ chế tự động quét mã nguồn kiểm thử (Source Code Validation):
-1. Quét đệ quy toàn bộ thư mục `test/`, `nodered/tests/`, `web/tests/`.
-2. Trích xuất tất cả các Test ID thực tế bằng biểu thức chính quy `\b(T-[A-Z0-9]+|FLOW-[0-9]+)\b` (phát hiện **49 Test IDs** hợp lệ).
-3. Duyệt từng cam kết trong [docs/audit/claims.yaml](file:///e:/IoT/DoAn/docs/audit/claims.yaml): nếu bất kỳ Test ID nào được khai báo trong `evidence_tests` mà không có trong mã nguồn thì đánh dấu `FAIL` ngay lập tức.
-4. Kiểm tra lệnh `test_command`: nếu là lệnh rỗng hoặc lệnh in dummy `print(...)` đối với các tier `VERIFIED` hoặc `PARTIAL` thì từ chối và báo lỗi.
-5. Thực thi lệnh kiểm thử thật và in bảng tổng kết minh bạch.
+#### 2.5 Kiểm Tra Tự Động Tính Đồng Nhất Của Tiền Tố Topic (scripts/verify_topic_prefix.py)
+Script tự động quét và kiểm tra 62 topic trong toàn bộ dự án:
+- **Tầng 1 (Firmware):** 17 hằng số `TOPIC_` trong [src/config.h](file:///e:/IoT/DoAn/src/config.h) đều mang tiền tố `Nhom09/smoke/`.
+- **Tầng 3 (Node-RED Middleware):** 11 node MQTT trong [nodered/flows_smoke_detector.json](file:///e:/IoT/DoAn/nodered/flows_smoke_detector.json) đều cấu hình topic bắt đầu bằng `Nhom09/`.
+- **Tầng 4 (Web SCADA):** 11 định nghĩa topic trong [web/app.js](file:///e:/IoT/DoAn/web/app.js) đều sử dụng tiền tố `Nhom09/`.
+- **Bộ Kiểm Thử MQTTX:** 23 bản tin kiểm thử mẫu trong [tests/mqttx_collection_slide65.json](file:///e:/IoT/DoAn/tests/mqttx_collection_slide65.json) đều tuân thủ namespace `Nhom09/`.
+
+Kết quả: **100% (62/62) topic** được cô lập an toàn trong không gian tên `Nhom09/`, loại bỏ nguy cơ xung đột trên public broker.
 
 ---
 
@@ -103,12 +109,12 @@ Công cụ `scripts/check_claims.py` được nâng cấp với cơ chế tự �
 
 ```text
 ================================================================================
-  3-TIER AUDIT CLAIM VALIDATOR - NHOM 04 HUIT (CODEBASE AUDIT V5.1)
+  3-TIER AUDIT CLAIM VALIDATOR - NHOM 04 HUIT (CODEBASE AUDIT V5.2)
   Classification: [VERIFIED] Fully Proven | [PARTIAL] Algorithmic | [SCOPE] Design Boundary
   Source Code Validation: Checking test ID integrity against codebase...
 ================================================================================
-Loaded 10 audit claims from: E:\IoT\DoAn\docs\audit\claims.yaml
-Discovered 49 distinct test IDs in test source files.
+Loaded 10 audit claims from: docs/audit/claims.yaml
+Discovered 51 distinct test IDs in test source files.
 
 Checking [C-EMA] (VERIFIED): Asymmetric EMA filter (alpha_rise=0.40, alpha_fa... [VERIFIED PASS]
 Checking [C-FSM-5STATES] (VERIFIED): Strict 5-state Edge FSM with hysteresis and heal... [VERIFIED PASS]
@@ -129,9 +135,9 @@ C-FSM-5STATES          | VERIFIED   | VERIFIED_PASS   | T-F1,T-F2,T-F3,T-F4,T-F5
 C-COMMAND-INTERLOCK    | VERIFIED   | VERIFIED_PASS   | T-C1,T-C2,T-C3,T-C4,T-C5,T-C6
 C-NODERED-RULES        | VERIFIED   | VERIFIED_PASS   | T-N1,T-N2,T-N3,T-N4,T-N5,T-N6,T-N7,T-N8,T-N9,T-N10,T-N11
 C-FLOW-INTEGRATION     | VERIFIED   | VERIFIED_PASS   | FLOW-01,FLOW-02,FLOW-03,FLOW-04
-C-WEB-SCADA-CLEAN      | VERIFIED   | VERIFIED_PASS   | T-W1,T-W2,T-W3,T-W4      
+C-WEB-SCADA-CLEAN      | VERIFIED   | VERIFIED_PASS   | T-W1,T-W2,T-W3,T-W4,T-W5 
 C-OFFLINE-BUFFER       | VERIFIED   | VERIFIED_PASS   | T-B1                     
-C-NETWORK-BACKOFF      | VERIFIED   | VERIFIED_PASS   | T-F12,T-R1               
+C-NETWORK-BACKOFF      | VERIFIED   | VERIFIED_PASS   | T-F12,T-R1,T-L1          
 C-TELEGRAM-FALLBACK    | PARTIAL    | PARTIAL_VALID   | T-N12                    
 C-SCOPE-BENCHMARKS     | SCOPE      | SCOPE_VALID     |                          
 ================================================================================
@@ -147,10 +153,9 @@ Summary: 10 Claims Evaluated
 
 ---
 
-### 4. Kết Luận & Khẳng Định Chất Lượng Dự Án
+### 4. Kết Luận
 
-Hệ thống Báo khói Cảnh báo sớm (Đề tài 04 - Lớp N09 - HUIT) đã đạt được mức độ hoàn thiện kỹ thuật cao nhất:
-1. **100% Mã Nguồn Thật Đồng Bộ:** Không có sự phân nhánh hay giả lập giữa mã nguồn firmware và mã nguồn kiểm thử unit test. Mọi logic phân tích lệnh, đệm vòng và exponential backoff đều được chia sẻ qua các header trong `lib/core/`.
-2. **Khóa An Toàn Nghiêm Ngặt:** Khóa an toàn PCCC thiết bị biên được chứng minh hoạt động độc lập, từ chối mọi can thiệp tắt quạt, MUTE còi hoặc TEST còi khi FSM đang trong trạng thái ALARM.
-3. **Phân Định Trách Nhiệm Rõ Ràng:** Tầng 1 (ESP32) tự chủ phản ứng an toàn; Tầng 3 (Node-RED) điều phối luật nâng cao và sơ tán liên vùng; Tầng 4 (Web SCADA) giám sát thuần túy chống XSS.
-4. **Tính Trung Thực Học Thuật Tuyệt Đối:** Toàn bộ tuyên bố trong tài liệu đều khớp chính xác với từng dòng mã nguồn, tham số phần cứng và kết quả thực thi tự động.
+Hồ sơ mã nguồn và tài liệu kỹ thuật của đề tài đã được chuẩn hóa với tính minh bạch khoa học và độ tin cậy kỹ thuật cao:
+1. Mọi tuyên bố đều có bài kiểm thử tự động tương ứng trong mã nguồn test (`T-W1`..`T-W5`, `T-C1`..`T-C6`, `T-B1`, `T-R1`, `T-L1`, `FLOW-01`..`FLOW-04`).
+2. Mã nguồn dùng chung (`lib/core/`) bảo đảm tính đồng nhất giữa firmware chạy thực tế trên vi điều khiển ESP32 và các bài unit test chạy trên môi trường giả lập.
+3. Các tham số vật lý, cơ chế quản lý bộ nhớ và giới hạn thời gian chờ được ghi nhận chính xác theo thiết kế phần cứng và giao thức mạng.

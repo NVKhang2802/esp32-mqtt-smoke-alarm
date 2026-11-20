@@ -7,7 +7,7 @@ void initOfflineBuffer() {
 }
 
 void pushOfflineRecord(float ppm, float temp, float hum, bool fan, bool buzzer, const char* stateStr, const char* eventType, bool mq2Valid, bool dhtValid) {
-  OfflineRecord rec;
+  OfflineRecord rec = {};
   rec.timestamp = millis() / 1000;
   rec.ppm = ppm;
   rec.temp = temp;
@@ -19,17 +19,17 @@ void pushOfflineRecord(float ppm, float temp, float hum, bool fan, bool buzzer, 
 
   if (stateStr != nullptr) {
     strncpy(rec.state, stateStr, sizeof(rec.state) - 1);
-    rec.state[sizeof(rec.state) - 1] = '\0';
   } else {
     strncpy(rec.state, "UNKNOWN", sizeof(rec.state) - 1);
   }
+  rec.state[sizeof(rec.state) - 1] = '\0';
 
   if (eventType != nullptr) {
     strncpy(rec.eventType, eventType, sizeof(rec.eventType) - 1);
-    rec.eventType[sizeof(rec.eventType) - 1] = '\0';
   } else {
     strncpy(rec.eventType, "TELEMETRY", sizeof(rec.eventType) - 1);
   }
+  rec.eventType[sizeof(rec.eventType) - 1] = '\0';
 
   s_ringBuffer.push(rec);
 }

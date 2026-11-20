@@ -65,7 +65,10 @@ const mockElements = {
   fsmStatusText: new MockElement('span'),
   alarmBanner: new MockElement('div'),
   bannerTitle: new MockElement('h4'),
-  bannerDesc: new MockElement('p')
+  bannerDesc: new MockElement('p'),
+  btnFanOff: new MockElement('button'),
+  btnBuzzerMute: new MockElement('button'),
+  btnBannerMute: new MockElement('button')
 };
 
 global.document = {
@@ -77,7 +80,7 @@ global.document = {
 
 // Require real app.js directly!
 const app = require('../app');
-const { escapeHtml, renderAuditTable, showToast, handleMqttMessage, STATE, DOM } = app;
+const { escapeHtml, renderAuditTable, showToast, handleMqttMessage, updateUiFromState, STATE, DOM } = app;
 
 describe('Web SCADA Direct app.js Unit Tests', () => {
 
@@ -173,6 +176,19 @@ describe('Web SCADA Direct app.js Unit Tests', () => {
     assert.equal(STATE.health.mq2, 'FAULT', 'Web SCADA must reflect MQ-2 fault badge');
     assert.equal(STATE.fanState, true, 'Web SCADA must reflect fan ON from ESP32');
     assert.equal(STATE.alarmThreshold, 400, 'Web SCADA must reflect alarmThreshold');
+  });
+
+  // T-W5: Direct updateUiFromState execution from app.js proving UI Safety Interlock
+  test('T-W5: updateUiFromState() disables actuator controls during ALARM and restores in SAFE', () => {
+    STATE.fsmState = 'ALARM';
+    updateUiFromState();
+    assert.equal(DOM.btnFanOff.disabled, true, 'Fan OFF button must be disabled during ALARM');
+    assert.equal(DOM.btnBuzzerMute.disabled, true, 'Buzzer MUTE button must be disabled during ALARM');
+
+    STATE.fsmState = 'SAFE';
+    updateUiFromState();
+    assert.equal(DOM.btnFanOff.disabled, false, 'Fan OFF button must be re-enabled during SAFE');
+    assert.equal(DOM.btnBuzzerMute.disabled, false, 'Buzzer MUTE button must be re-enabled during SAFE');
   });
 
 });

@@ -10,9 +10,12 @@
  * @details Dung chung cho Firmware ESP32 (src/main.cpp) va bo kiem thu Native Unity (test/test_core.cpp)
  */
 struct ExponentialBackoff {
-    uint32_t currentMs = 1000;
-    uint32_t initialMs = 1000;
-    uint32_t maxMs     = 16000;
+    uint32_t currentMs;
+    uint32_t initialMs;
+    uint32_t maxMs;
+
+    ExponentialBackoff(uint32_t init = 1000, uint32_t max = 16000)
+        : currentMs(init), initialMs(init), maxMs(max) {}
 
     void fail() {
         currentMs = nextBackoff(currentMs, maxMs);

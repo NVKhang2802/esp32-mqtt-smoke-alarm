@@ -6,7 +6,7 @@ Validates topic namespace prefix consistency across all 4 system layers:
 1. Firmware Configuration (src/config.h)
 2. Middleware Node-RED Flows (nodered/flows_smoke_detector.json)
 3. Web SCADA Application (web/app.js)
-4. MQTTX Test Collection (tests/mqttx_collection_slide65.json)
+4. MQTTX Test Collection (tests/mqttx_scenario_collection.json)
 
 Ensures zero namespace pollution or topic collisions on shared public MQTT brokers.
 """
@@ -77,7 +77,7 @@ def verify_web_scada():
     return True, f"Verified {len(matches)} topic references in web/app.js"
 
 def verify_mqttx_collection():
-    path = os.path.join(BASE_DIR, "tests", "mqttx_collection_slide65.json")
+    path = os.path.join(BASE_DIR, "tests", "mqttx_scenario_collection.json")
     if not os.path.isfile(path):
         return False, f"Missing MQTTX collection: {path}"
     with open(path, "r", encoding="utf-8") as f:
@@ -107,7 +107,7 @@ def verify_mqttx_collection():
     except ValueError as e:
         return False, str(e)
 
-    return True, f"Verified {checked} messages in tests/mqttx_collection_slide65.json"
+    return True, f"Verified {checked} messages in tests/mqttx_scenario_collection.json"
 
 def main():
     print("=" * 75)

@@ -78,6 +78,6 @@ claims:
   - id: C-SCOPE-BENCHMARKS
     tier: SCOPE
     description: "Academic scope boundaries: Port 1883 plaintext with Nhom09/ prefix, RL=10k vs R0=1.0k, demo thresholds (400/350 PPM), ArduinoJson v7 RAII heap"
-    reality: "Automated script verifies topic prefix consistency (Nhom09/) across 4 layers: config.h, flows_smoke_detector.json, app.js, and mqttx_collection_slide65.json (62 topics checked)"
+    reality: "Automated script verifies topic prefix consistency (Nhom09/) across 4 layers: config.h, flows_smoke_detector.json, app.js, and mqttx_scenario_collection.json (62 topics checked)"
     evidence_tests: []
     test_command: "python scripts/verify_topic_prefix.py"

@@ -1,15 +1,24 @@
 # ==============================================================================
-# .gitignore - Dự Án IoT: Hệ Thống Báo Khói Cảnh Báo Sớm (ESP32 - MQTT - Web)
+# .gitignore - Dự Án IoT: Hệ Thống Báo Khói Cảnh Báo Sớm (ESP32 - MQTT - Web SCADA)
 # ==============================================================================
-# Phân loại quy tắc:
-# - ĐƯỢC PUSH LÊN GITHUB: Mã nguồn C++ chính (src/), giao diện Web (web/), 
-#   cấu hình luồng Node-RED (nodered/*.json), cấu hình Wokwi (diagram.json, wokwi.toml),
-#   cấu hình PlatformIO (platformio.ini), file kịch bản MQTTX mẫu, README.md, .gitignore.
-# - KHÔNG ĐƯỢC PUSH (Bị chặn nghiêm ngặt): Nhị phân build PlatformIO, thư viện tải tự động,
-#   bộ công cụ & script tự động hóa nội bộ (tools/
-!scripts/
-!scripts/check_claims.py), file báo cáo đồ án (docs/),
-#   file khóa tạm Office, nhật ký runtime, thông tin bảo mật & file rác IDE/OS.
+# QUY TẮC QUẢN LÝ MÃ NGUỒN GITHUB:
+# - ĐƯỢC PUSH LÊN GITHUB:
+#   + Firmware ESP32: src/, lib/core/, platformio.ini, diagram.json, wokwi.toml, main.cpp
+#   + Web SCADA App: web/ (HTML, CSS, JS, libs)
+#   + Node-RED Engine: nodered/flows_smoke_detector.json, nodered/functions/*.js
+#   + Bộ kiểm thử tự động: tests/*.py, run_all_tests.py, test/test_core.cpp, nodered/tests/, web/tests/
+#   + Script công cụ chính thống: scripts/*.py (kiểm toán, vẽ sơ đồ mạch, kiểm tra format)
+#   + Tài liệu thuyết minh & Sơ đồ: README.md, docs/md/, docs/images/, docs/audit/claims.yaml
+#
+# - BỊ CHẶN NGHIÊM NGẶT (KHÔNG PUSH):
+#   + Nhị phân build PlatformIO (.pio/, *.bin, *.elf, *.hex)
+#   + Thông tin bảo mật & Khóa riêng tư (.env, secrets.h, *.key, *.pem)
+#   + Thư mục runtime Node-RED cục bộ (.nodered_runtime/, flows_cred.json)
+#   + File khóa tạm Microsoft Office khi đang mở tài liệu (~$*, *.tmp)
+#   + File báo cáo nhị phân dung lượng lớn (docs/word/*.docx, docs/pptx/*.pptx, docs/pdf/)
+#   + Thư mục nháp & script thử nghiệm (scratch/, tools/)
+#   + Nhật ký runtime (logs/*.log) & Cache biên dịch (Python __pycache__, Node node_modules)
+#   + File rác hệ điều hành & IDE cá nhân (Thumbs.db, .DS_Store, .vscode/* cache)
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -34,9 +43,13 @@ compile_commands.json
 *.dmp
 *.core
 
+# Chỉ theo dõi mã nguồn thư viện do nhóm tự viết trong lib/core/
+lib/*
+!lib/core/
+
 # ------------------------------------------------------------------------------
 # 2. BẢO MẬT & THÔNG TIN NHẠY CẢM (CRITICAL SECRETS & CREDENTIALS)
-# Chống lộ mật khẩu Wi-Fi, MQTT Broker private key, token hoặc API key
+# Chống rò rỉ mật khẩu Wi-Fi, MQTT Broker private key, token hoặc API key
 # ------------------------------------------------------------------------------
 .env
 .env.*
@@ -58,36 +71,76 @@ auth.json
 service_account*.json
 
 # ------------------------------------------------------------------------------
-# 3. BỘ CÔNG CỤ TỰ ĐỘNG HÓA & SCRIPTS NỘI BỘ (LOCAL TOOLS & AUTOMATION)
-# Thư mục tools/
-!scripts/
-!scripts/check_claims.py và các script sinh tài liệu/slide chỉ chạy local
+# 3. NODE-RED RUNTIME & CẤU HÌNH CỤC BỘ (LOCAL RUNTIME & STATE)
+# Chặn thư mục runtime cá nhân, session cache và mật khẩu luồng
 # ------------------------------------------------------------------------------
+.nodered_runtime/
+flows_cred.json
+flows_*_cred.json
+.config.runtime.json
+.config.nodes.json
+.sessions.json
+
+# ------------------------------------------------------------------------------
+# 4. FILE KHÓA TẠM THỜI CỦA MICROSOFT OFFICE (OFFICE LOCK & TEMP FILES)
+# Tự sinh khi đang mở Word/PowerPoint/Excel để biên tập báo cáo và slide
+# ------------------------------------------------------------------------------
+~$*
+~$*.docx
+~$*.pptx
+~$*.xlsx
+~$*.doc
+~$*.ppt
+~$*.xls
+~*
+*.tmp
+*.bak
+*.saved
+*.auto
+
+# ------------------------------------------------------------------------------
+# 5. FILE BÁO CÁO NHỊ PHÂN DUNG LƯỢNG LỚN (LARGE BINARY DELIVERABLES)
+# Chặn các file nhị phân lớn để tránh phình dung lượng git repo;
+# Giữ lại sơ đồ hình ảnh (docs/images/) và tài liệu markdown (docs/md/)
+# ------------------------------------------------------------------------------
+docs/word/
+docs/pptx/
+docs/pdf/
+docs/xlsx/
+*.docx
+*.pptx
+*.pdf
+*.xlsx
+*.xls
+*.doc
+*.ppt
+
+# ------------------------------------------------------------------------------
+# 6. THƯ MỤC NHÁP & SCRIPT THỬ NGHIỆM CỤC BỘ (SCRATCH & LOCAL TOOLS)
+# Thư mục scratch và tools chỉ dùng để viết nháp/sinh tạm thời
+# ------------------------------------------------------------------------------
+scratch/
 tools/
-!scripts/
-!scripts/check_claims.py
-*.py
-tests/*.py
-nodered/*.py
+temp/
+tmp/
+test_docx.py
+temp_*.py
+*_temp.py
+start_system.bat
 *.ps1
 *.psm1
 *.bat
 *.cmd
 
-# Scratch, file thử nghiệm tạm thời
-test_docx.py
-test_*.py
-temp_*.py
-*_temp.py
-scratch/
-temp/
-tmp/
+# Ngoại lệ: Cho phép các script kiểm toán/công cụ chính thống trong scripts/
+!scripts/
+!scripts/*.py
 
 # ------------------------------------------------------------------------------
-# 4. PYTHON BYTECACHE & MÔI TRƯỜNG ẢO (VIRTUAL ENVIRONMENTS)
+# 7. PYTHON BYTECACHE & MÔI TRƯỜNG ẢO (VIRTUAL ENVIRONMENTS)
 # ------------------------------------------------------------------------------
 __pycache__/
-**/__pycache__/
+**/**/__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -98,9 +151,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/*
-!lib/core/
-lib64/
 parts/
 sdist/
 var/
@@ -126,37 +176,7 @@ htmlcov/
 .ruff_cache/
 
 # ------------------------------------------------------------------------------
-# 5. TÀI LIỆU NỘI BỘ, SLIDES & BÁO CÁO ĐỒ ÁN (LOCAL DOCS & LARGE MEDIA)
-# Thư mục docs/ chứa báo cáo tiến độ tuần, slide PPTX, Word, PDF kích thước lớn
-# ------------------------------------------------------------------------------
-docs/
-*.docx
-*.pptx
-*.pdf
-*.xlsx
-*.xls
-*.doc
-*.ppt
-
-# ------------------------------------------------------------------------------
-# 6. FILE KHÓA TẠM THỜI CỦA MICROSOFT OFFICE (OFFICE LOCK & TEMP FILES)
-# Tự sinh khi đang mở Word/PowerPoint/Excel để biên tập báo cáo
-# ------------------------------------------------------------------------------
-~$*
-~$*.docx
-~$*.pptx
-~$*.xlsx
-~$*.doc
-~$*.ppt
-~$*.xls
-~*
-*.tmp
-*.bak
-*.saved
-*.auto
-
-# ------------------------------------------------------------------------------
-# 7. NHẬT KÝ KIỂM THỬ & RUNTIME TRACES (LOG FILES)
+# 8. NHẬT KÝ KIỂM THỬ & RUNTIME TRACES (LOG FILES)
 # Tránh đẩy file log chạy thực tế làm bẩn lịch sử commit
 # ------------------------------------------------------------------------------
 logs/*.log
@@ -166,9 +186,9 @@ logs/*.log
 !logs/.gitkeep
 
 # ------------------------------------------------------------------------------
-# 8. CẤU HÌNH IDE & EDITOR CÁ NHÂN (IDE & EDITORS CACHE)
+# 9. CẤU HÌNH IDE & EDITOR CÁ NHÂN (IDE & EDITORS CACHE)
 # ------------------------------------------------------------------------------
-# Visual Studio Code
+# Visual Studio Code: Chặn cache, nhưng cho phép chia sẻ settings & extensions chuẩn
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
@@ -194,7 +214,7 @@ logs/*.log
 *.orig
 
 # ------------------------------------------------------------------------------
-# 9. FILE RÁC HỆ ĐIỀU HÀNH (OS SYSTEM ARTIFACTS)
+# 10. FILE RÁC HỆ ĐIỀU HÀNH & WEB DEPENDENCIES (OS & NPM ARTIFACTS)
 # ------------------------------------------------------------------------------
 # Windows
 Thumbs.db
@@ -210,15 +230,10 @@ $RECYCLE.BIN/
 .AppleDouble
 .LSOverride
 
-# ------------------------------------------------------------------------------
-# 10. NODE.JS & WEB DEPENDENCIES (DỰ PHÒNG NẾU CÓ DÙNG NPM)
-# ------------------------------------------------------------------------------
+# Node.js & Web Dependencies (nếu có sử dụng npm)
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-store/
 .parcel-cache/
-
-.nodered_runtime/
-

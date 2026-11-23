@@ -2,7 +2,7 @@
   {
     "id": "test-client-n09",
     "name": "MQTTX_Smoke_Detector_Scenario_Collection",
-    "clientId": "MQTTX_Test_Client_Nhom04",
+    "clientId": "MQTTX_Test_Client_Nhom09",
     "host": "broker.emqx.io",
     "port": 1883,
     "keepalive": 60,

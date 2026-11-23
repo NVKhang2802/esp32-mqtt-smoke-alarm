@@ -1,0 +1,48 @@
+# Báo Cáo Nghiệm Thu & Walkthrough: Hiệu Chỉnh Hoàn Thiện Slide Bảng BOM (Slide 2 - Nhóm 04)
+
+## Tóm Tắt Công Việc Đã Thực Hiện
+Đã tiến hành rà soát chuyên sâu và hiệu chỉnh trực tiếp trên file trình chiếu [`Bao_Cao_He_Thong_IoT_4_Slides_Nhom04_Chuan.pptx`](file:///e:/IoT/DoAn/docs/pptx/Bao_Cao_He_Thong_IoT_4_Slides_Nhom04_Chuan.pptx) theo đúng **Phương án 1** được phê duyệt:
+1. **Lấp đầy 100% dữ liệu kỹ thuật:** Điền đầy đủ cả 4 cột (`Thông Số Kỹ Thuật`, `Vai Trò Thực Tế`, `ĐVT`, `SL`) cho toàn bộ 34 danh mục linh kiện, sử dụng chuẩn dữ liệu từ [`docs/md/BOM.md`](file:///e:/IoT/DoAn/docs/md/BOM.md).
+2. **Khắc phục triệt để lỗi tràn màn hình:** Tối ưu hóa phân bổ độ rộng 6 cột, rút gọn từ khóa cô đọng thành 1 dòng/ô, tinh chỉnh đệm ô ($0.005"$) và cỡ chữ ($6.8\text{ pt}$).
+3. **Cân đối hoàn hảo 2 bảng A & B:** Bổ sung hàng linh kiện dự phòng và hàng **Tổng kinh phí dự toán (~720.000 VNĐ)** ở chân Bảng B, giúp cả 2 bảng có cùng 21 hàng, đáy bảng ngang bằng chằn chặn và cách Footer một khoảng an toàn tuyệt đối.
+
+---
+
+## Minh Chứng Trực Quan (Trước & Sau Hiệu Chỉnh)
+
+### 1. Slide 2 Sau Khi Hoàn Thiện (Bản Chuẩn Mới Nhất)
+> [!NOTE]
+> * Cả hai bảng A & B đều hiển thị trọn vẹn 21 hàng, không còn ô trống, không còn tình trạng tràn đáy.
+> * Chân Bảng B có hàng tóm tắt kinh phí nổi bật với tag `~720k` màu cam/đỏ công nghệ.
+
+![Slide 2 BOM Hoàn Chỉnh](/C:/Users/NV/.gemini/antigravity-ide/brain/dd5b1356-c058-4bb9-be83-121a140a76ba/scratch/slides_export/NEW_slide_2.png)
+
+---
+
+### 2. So Sánh Với Tình Trạng Ban Đầu (File Gốc Bị Tràn)
+> [!WARNING]
+> * Ở bản gốc trước đây, bảng BOM bị tràn qua đáy màn hình ($Y > 7.5"$), làm mất từ dòng 12–18 (Bảng A), mất dòng 30–34 (Bảng B) và che khuất hoàn toàn thanh Footer.
+
+![Slide 2 Cũ Bị Tràn Màn Hình](/C:/Users/NV/.gemini/antigravity-ide/brain/dd5b1356-c058-4bb9-be83-121a140a76ba/scratch/slides_export/OLD_slide_2.png)
+
+---
+
+## Chi Tiết Thông Số Kỹ Thuật Slide 2 Sau Cải Tiến
+
+| Thành Phần | Kích Thước & Tọa Độ | Trạng Thái Hiển Thị |
+| :--- | :--- | :--- |
+| **Bảng A (Table 12)** | `Top = 2.98"`, `Width = 5.75"`, 21 hàng | Đầy đủ STT 1–18 (Khối I & II). Đáy bảng tại $Y \approx 6.45"$. |
+| **Bảng B (Table 14)** | `Top = 2.98"`, `Width = 5.75"`, 21 hàng | Đầy đủ STT 19–34 (Khối III & IV) + Hàng dự phòng + Hàng Tổng kinh phí $\Sigma$. Đáy bảng tại $Y \approx 6.45"$. |
+| **Cột Phân Bổ (6 cột)** | `[0.28", 1.62", 1.70", 1.43", 0.36", 0.36"]` | Rộng rãi, không bị ngắt dòng đôi, text thanh thoát. |
+| **Độ Cách Footer** | Khoảng đệm tự do $\approx 0.60"$ tới Footer ($Y = 7.05"$) | Rất an toàn, tuyệt đối không bị đè chữ khi chiếu trên mọi loại máy chiếu. |
+| **Typography** | Font Arial, Header $7.2\text{ pt}$ Bold, Data $6.8\text{ pt}$ | Màu chữ Navy `#1A365D`, màu nổi bật Tổng kinh phí `#D9381E`. |
+
+---
+
+## Kiểm Tra Tổng Thể Cả 4 Slide Của File Chuẩn
+1. **Slide 1 (Bìa Báo Cáo):** Định dạng hiện đại, chuẩn kiến trúc 3 tầng (Device - MQTT Services - Web Server App), khớp slide 7 chương 5 môn IoT.
+2. **Slide 2 (Device & BOM):** Đã hoàn thiện 100% bảng BOM 34 linh kiện và tóm tắt kinh phí 720k, 2 hộp kiến trúc FreeRTOS và cơ điện tử phía trên giữ nguyên vẹn.
+3. **Slide 3 (MQTT Services):** 4 Microservices (Auth, Collect, Control, Keep-alive) với bullet tam giác chuẩn PowerPoint và kiến trúc topic chuẩn hóa.
+4. **Slide 4 (Web Server App):** 4 khối chức năng (Data Representation, Data Management, Control GUI, Data Analysis) phong cách Glassmorphism trực quan.
+
+File sẵn sàng sử dụng: [`e:\IoT\DoAn\docs\pptx\Bao_Cao_He_Thong_IoT_4_Slides_Nhom04_Chuan.pptx`](file:///e:/IoT/DoAn/docs/pptx/Bao_Cao_He_Thong_IoT_4_Slides_Nhom04_Chuan.pptx).
